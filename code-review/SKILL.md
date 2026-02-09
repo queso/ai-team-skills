@@ -7,15 +7,22 @@ description: Reviews all unmerged code in the current branch for readability, se
 
 Review all unmerged code in the current branch.
 
-## Step 1: Determine the Base Branch
+## Step 1: Determine What to Review
 
-Run `git rev-parse --verify main 2>/dev/null || git rev-parse --verify master` to identify whether the repo uses `main` or `master`.
+First, detect the base branch: `git rev-parse --verify main 2>/dev/null || git rev-parse --verify master`.
+
+Then determine the review scope:
+
+- **On a feature branch with uncommitted changes**: review only the uncommitted work using `git diff HEAD`
+- **On a feature branch with a clean working tree**: review all commits diverged from the base branch using `git diff <base-branch>...HEAD`
+- **On the base branch with uncommitted changes**: review staged and unstaged changes using `git diff HEAD`
+- **On the base branch with no uncommitted changes**: nothing to review — inform the user
 
 ## Step 2: Launch the Review
 
 Use a **code-review-expert** subagent (via the Task tool) to perform a thorough review. The subagent should:
 
-1. Run `git diff <base-branch>...HEAD` and `git log --oneline <base-branch>...HEAD` itself to collect all unmerged changes
+1. Run the appropriate diff command from Step 1, plus `git log --oneline <base-branch>...HEAD` if on a feature branch, to collect all changes under review
 2. Read any files it needs for additional context
 3. Evaluate the changes against the criteria in the review checklist below
 4. Consult the `references/` directory for language-specific and domain-specific examples of good and bad patterns
