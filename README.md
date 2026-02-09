@@ -33,6 +33,34 @@ In Claude Code, run:
 
 The skill will detect your base branch, diff all unmerged changes, and return a structured review.
 
+### write-prd
+
+Creates a new Product Requirements Document with auto-numbered filenames. The skill:
+
+- **Finds your PRD directory** and determines the next sequence number (`0001`, `0002`, etc.)
+- **Generates a kebab-case filename** from the feature description (e.g., `0020-fix-social-sharing.md`)
+- **Gathers business context** — asks you directly if the "why" isn't clear
+- **Writes a structured PRD** covering problem statement, business context, success metrics, user stories, scope, requirements, edge cases, and risks
+- **Reviews the draft** against a quality checklist before finalizing
+
+Includes reference guides on PRD best practices (with good/bad examples) and a battle-tested template.
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@write-prd -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/write-prd
+```
+
+The skill will ask for the feature context and produce a numbered PRD in your project's PRD directory.
+
 ## Contributing
 
 PRs welcome. Each skill lives in its own directory:
