@@ -61,6 +61,35 @@ In Claude Code, run:
 
 The skill will ask for the feature context and produce a numbered PRD in your project's PRD directory.
 
+### start-new-app
+
+Scaffolds a new application from the [context-kit](https://github.com/queso/context-kit) template. The skill:
+
+- **Asks for an app name** and where to create the project
+- **Clones context-kit** and removes its git history
+- **Renames everything** — updates `package.json`, `CLAUDE.md`, `app/layout.tsx`, and any other "context-kit" references to your app name
+- **Sets up environment** — copies `.env.example` to `.env`
+- **Creates a PRD directory** at `prd/` for structured product requirements
+- **Creates a docs directory** at `docs/` for technical and repo documentation
+- **Makes an initial commit** so you start with a clean git history
+- **Asks for your first PRD** — describe what you want to build and it will create a structured PRD to guide development
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@start-new-app -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/start-new-app
+```
+
+The skill will walk you through naming your project, scaffold it from the template, and prompt you to describe what you want to build.
+
 ## Contributing
 
 PRs welcome. Each skill lives in its own directory:
