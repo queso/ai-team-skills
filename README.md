@@ -90,6 +90,32 @@ In Claude Code, run:
 
 The skill will walk you through naming your project, scaffold it from the template, and prompt you to describe what you want to build.
 
+### v0-setup
+
+Bootstraps the v0-to-project design adaptation pipeline for projects using Next.js App Router, Tailwind CSS v4, and shadcn/ui. The skill:
+
+- **Creates an `adapt-v0` skill** — a design-to-code adaptation specialist that preserves visual fidelity when integrating v0.dev output
+- **Creates an `/adapt-v0` command** — accepts a v0 URL or feature folder name and runs the full adaptation process
+- **Creates a `fetch-v0.mjs` script** — pulls source files directly from v0's Platform API (requires `V0_API_KEY`)
+- **Sets up a `designs/` directory** — with AGENTS.md context, a README, and a template for adaptation notes
+- **Replaces screenshot workflows** — uses actual v0 source code instead of Playwright screenshots
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@v0-setup -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/v0-setup
+```
+
+The skill will create all the files in your project. After setup, use `/adapt-v0 <v0-url>` to pull and adapt designs.
+
 ## Contributing
 
 PRs welcome. Each skill lives in its own directory:

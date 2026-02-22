@@ -1,7 +1,12 @@
+---
+name: v0-setup
+description: Bootstraps the v0-to-project design adaptation pipeline. Creates skills, commands, and scripts for pulling v0.dev designs via the Platform API and adapting them to project conventions.
+---
+
 # Adapt v0 — Bootstrap Guide
 
-This README contains everything needed to set up the v0-to-project design adaptation
-pipeline. Claude Code: read this file completely, then create all listed files in the
+This skill contains everything needed to set up the v0-to-project design adaptation
+pipeline. Read this file completely, then create all listed files in the
 specified locations when the user runs `/v0-setup`.
 
 ## Overview
@@ -489,7 +494,7 @@ so most imports translate directly. The main adaptation work is:
 ```markdown
 # /v0-setup — Bootstrap the v0 Design Adaptation Pipeline
 
-Read the skill README at `skills/adapt-v0-bootstrap/README.md` and create every
+Read the skill at `skills/adapt-v0-bootstrap/SKILL.md` and create every
 file listed in the Setup Instructions section.
 
 ## What This Creates
