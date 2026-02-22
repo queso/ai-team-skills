@@ -20,20 +20,28 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-
-const V0_API_BASE = "https://api.v0.dev/v1";
+import { join } from "node:path";
 
 function parseArgs(argv) {
   const args = argv.slice(2);
   let inputArg = null;
   let customName = null;
   let outputDir = null;
+  let versionId = null;
+  let listVersions = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--output-dir" && i + 1 < args.length) {
       outputDir = args[i + 1];
       i++;
+    } else if (args[i] === "--version") {
+      const next = args[i + 1];
+      if (next !== undefined && next !== "" && !next.startsWith("--")) {
+        versionId = next;
+        i++;
+      }
+    } else if (args[i] === "--list-versions") {
+      listVersions = true;
     } else if (!inputArg) {
       inputArg = args[i];
     } else if (!customName) {
@@ -41,57 +49,213 @@ function parseArgs(argv) {
     }
   }
 
-  return { inputArg, customName, outputDir: outputDir || process.cwd() };
+  return { inputArg, customName, outputDir: outputDir || process.cwd(), versionId, listVersions };
+}
+
+function isHashSegment(segment) {
+  return /^[a-zA-Z0-9]{6,}$/.test(segment) && !/^[a-z]+$/.test(segment) && !/^\d+$/.test(segment);
 }
 
 function extractChatId(input) {
-  const urlMatch = input.match(/v0\.(?:app|dev)\/chat\/([a-zA-Z0-9_-]+)/);
-  if (urlMatch) return urlMatch[1];
-  return input;
+  if (input == null) {
+    throw new Error(`extractChatId: input must be a string, got ${input}`);
+  }
+  const trimmed = input.trim();
+  if (trimmed === "") {
+    return { slug: "", hashId: "", featureName: "" };
+  }
+
+  const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+  if (isUrl) {
+    if (!/^https?:\/\//i.test(trimmed)) {
+      throw new Error(`extractChatId: unsupported URL protocol — only http/https URLs are supported: ${trimmed}`);
+    }
+    const v0Match = trimmed.match(/v0\.(?:app|dev)\/chat\/([a-zA-Z0-9_-]+)/);
+    if (!v0Match) {
+      throw new Error(`extractChatId: unsupported URL host — only v0.app and v0.dev URLs are supported: ${trimmed}`);
+    }
+    const slug = v0Match[1];
+    return resolveSlug(slug);
+  }
+
+  return resolveSlug(trimmed);
 }
 
-function deriveFeatureName(chatId) {
-  const parts = chatId.split("-");
+function resolveSlug(slug) {
+  const parts = slug.split("-");
   if (parts.length > 1) {
     const last = parts[parts.length - 1];
-    if (/^[a-zA-Z0-9]{6,}$/.test(last) && !/^[a-z]+$/.test(last)) {
-      return parts.slice(0, -1).join("-");
+    if (isHashSegment(last)) {
+      return {
+        slug,
+        hashId: last,
+        featureName: parts.slice(0, -1).join("-"),
+      };
     }
   }
-  return chatId;
+  return { slug, hashId: slug, featureName: slug };
 }
 
-async function fetchChat(chatId, apiKey) {
-  const response = await fetch(`${V0_API_BASE}/chats/${chatId}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`v0 API error (${response.status}): ${error}`);
-  }
-  return response.json();
+function deriveFeatureName(slug) {
+  return extractChatId(slug).featureName;
 }
 
-async function fetchVersion(chatId, versionId, apiKey) {
-  const url = `${V0_API_BASE}/chats/${chatId}/versions/${versionId}?includeDefaultFiles=false`;
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`v0 API version fetch error (${response.status}): ${error}`);
+/**
+ * Format the version list table for --list-versions output.
+ */
+function formatVersionList(hashId, versions, bestVersion) {
+  const total = versions.length;
+  const lines = [`Versions for chat ${hashId} (${total} total):`];
+
+  for (let i = 0; i < versions.length; i++) {
+    const v = versions[i];
+    const index = total - i;
+    const marker = bestVersion && v.id === bestVersion.id ? "  (selected)" : "";
+    lines.push(`  #${index}  ${v.id}  ${v.status}  ${v.createdAt}${marker}`);
   }
-  return response.json();
+
+  return lines.join("\n");
+}
+
+/**
+ * Find the next older completed version after the selected one in the list.
+ */
+function findNextOlderCompleted(versions, selectedVersionId) {
+  let foundSelected = false;
+  for (const v of versions) {
+    if (v.id === selectedVersionId) {
+      foundSelected = true;
+      continue;
+    }
+    if (foundSelected && v.status === "completed") {
+      return v;
+    }
+  }
+  return null;
+}
+
+/**
+ * Orchestrate the full fetch pipeline with injected dependencies.
+ *
+ * @param {object} options - Pipeline options
+ * @param {object} deps - Injected dependencies for testability
+ * @returns {Promise<object>} Pipeline result
+ */
+async function runPipeline(options, deps) {
+  const { inputArg, customName, outputDir, apiKey, versionId, listVersions } = options;
+
+  // Step 1: Extract chat identity from the input
+  const { slug, hashId, featureName: derivedFeatureName } = extractChatId(inputArg);
+  const effectiveFeatureName = customName || derivedFeatureName;
+
+  // Sanitize featureName to prevent path traversal
+  if (
+    effectiveFeatureName.includes("..") ||
+    effectiveFeatureName.includes("/") ||
+    effectiveFeatureName.includes("\\")
+  ) {
+    throw new Error(`Invalid feature name: "${effectiveFeatureName}" contains path traversal characters`);
+  }
+
+  // Step 2: Fetch the version list
+  const { versions, resolvedChatId } = await deps.fetchVersionList(slug, hashId, apiKey);
+
+  // Step 3: Handle --list-versions flag (early return, no download)
+  if (listVersions) {
+    const bestVersion = deps.selectBestVersion(versions);
+    const listVersionsOutput = formatVersionList(hashId, versions, bestVersion);
+
+    return {
+      featureName: effectiveFeatureName,
+      designDir: undefined,
+      versionId: bestVersion ? bestVersion.id : null,
+      resolvedChatId,
+      totalFiles: 0,
+      customFileCount: 0,
+      defaultFileCount: 0,
+      warnings: [],
+      listVersionsOutput,
+    };
+  }
+
+  // Step 4: Select the version to download
+  let selectedVersionId;
+  if (versionId) {
+    selectedVersionId = versionId;
+  } else {
+    const bestVersion = deps.selectBestVersion(versions);
+    if (!bestVersion) {
+      throw new Error("No suitable version found. The version list may be empty.");
+    }
+    selectedVersionId = bestVersion.id;
+  }
+
+  // Step 5: Build the output directory path
+  const designDir = join(outputDir, "designs", effectiveFeatureName, "v0-source");
+  deps.mkdirSync(designDir, { recursive: true });
+
+  // Step 6: Download and extract files
+  const extractedFiles = await deps.downloadAndExtract(resolvedChatId, selectedVersionId, apiKey, designDir);
+
+  // Step 7: Fetch custom file names and classify
+  const customFileNames = await deps.fetchCustomFileList(resolvedChatId, selectedVersionId, apiKey);
+  const classified = deps.classifyFiles(extractedFiles, customFileNames);
+
+  // Step 8: Validate custom files for placeholder content
+  const validationResult = deps.validateCustomFiles(classified.custom, deps.isPlaceholderContent);
+
+  // Step 9: Handle placeholder warnings
+  if (validationResult.warnings.length > 0) {
+    for (const warning of validationResult.warnings) {
+      deps.console.error(`Warning: ${warning.name} — ${warning.reason}`);
+    }
+
+    const olderVersion = findNextOlderCompleted(versions, selectedVersionId);
+    if (olderVersion) {
+      deps.console.error(`Try: --version ${olderVersion.id}`);
+    }
+  }
+
+  // Step 10: Build and write manifest
+  const customSet = new Set(customFileNames);
+  const manifest = {
+    chatId: resolvedChatId,
+    featureName: effectiveFeatureName,
+    fetchedAt: new Date().toISOString(),
+    sourceUrl: `https://v0.app/chat/${resolvedChatId}`,
+    versionId: selectedVersionId,
+    versionSelectedFrom: versions.length,
+    customFileCount: classified.custom.length,
+    defaultFileCount: classified.default.length,
+    warnings: validationResult.warnings,
+    files: extractedFiles.map((f) => ({
+      name: f.name,
+      size: f.size,
+      isCustom: customSet.has(f.name),
+    })),
+  };
+
+  deps.writeFileSync(join(designDir, "manifest.json"), JSON.stringify(manifest, null, 2));
+
+  // Step 11: Log summary
+  deps.console.log(
+    `Done! ${extractedFiles.length} files (${classified.custom.length} custom, ${classified.default.length} default) written to ${designDir}`,
+  );
+
+  return {
+    featureName: effectiveFeatureName,
+    designDir,
+    versionId: selectedVersionId,
+    resolvedChatId,
+    totalFiles: extractedFiles.length,
+    customFileCount: classified.custom.length,
+    defaultFileCount: classified.default.length,
+    warnings: validationResult.warnings,
+  };
 }
 
 async function main() {
-  const { inputArg, customName, outputDir } = parseArgs(process.argv);
+  const { inputArg, customName, outputDir, versionId, listVersions } = parseArgs(process.argv);
 
   if (!inputArg) {
     console.error("Usage: node fetch-v0.mjs <v0-url-or-chat-id> [feature-name] [--output-dir <path>]");
@@ -109,75 +273,33 @@ async function main() {
     process.exit(1);
   }
 
-  const chatId = extractChatId(inputArg);
-  const featureName = customName || deriveFeatureName(chatId);
-  const designDir = join(outputDir, "designs", featureName);
+  const { fetchVersionList, selectBestVersion } = await import("./version-list.mjs");
+  const { downloadAndExtract } = await import("./zip-download.mjs");
+  const { fetchCustomFileList, classifyFiles, validateCustomFiles } = await import("./file-filter.mjs");
+  const { isPlaceholderContent } = await import("./placeholder-detection.mjs");
 
-  console.log(`Chat ID: ${chatId}`);
-  console.log(`Feature: ${featureName}`);
-  console.log(`Output:  ${designDir}\n`);
+  const result = await runPipeline(
+    { inputArg, customName, outputDir, apiKey, versionId, listVersions },
+    {
+      fetchVersionList,
+      selectBestVersion,
+      downloadAndExtract,
+      fetchCustomFileList,
+      classifyFiles,
+      validateCustomFiles,
+      isPlaceholderContent,
+      writeFileSync,
+      mkdirSync,
+      console,
+    },
+  );
 
-  console.log("Fetching chat metadata...");
-  const chat = await fetchChat(chatId, apiKey);
-
-  const latestVersion = chat.latestVersion;
-  if (!latestVersion) {
-    console.error("Error: No version found for this chat.");
-    process.exit(1);
+  if (result.listVersionsOutput) {
+    console.log(result.listVersionsOutput);
   }
-
-  console.log(`Latest version: ${latestVersion.id} (status: ${latestVersion.status})`);
-
-  let files = latestVersion.files;
-  if (files && files.length > 0 && !files[0].content) {
-    console.log("Fetching full version with file contents...");
-    const fullVersion = await fetchVersion(chatId, latestVersion.id, apiKey);
-    files = fullVersion.files;
-  }
-
-  if (!files || files.length === 0) {
-    console.error("Error: No files found in the latest version.");
-    process.exit(1);
-  }
-
-  console.log(`Found ${files.length} files\n`);
-  mkdirSync(designDir, { recursive: true });
-
-  const manifest = {
-    chatId,
-    featureName,
-    fetchedAt: new Date().toISOString(),
-    sourceUrl: `https://v0.app/chat/${chatId}`,
-    versionId: latestVersion.id,
-    files: [],
-  };
-
-  for (const file of files) {
-    const fileName = file.name || file.path;
-    if (!fileName) {
-      console.warn("Skipping file with no name/path");
-      continue;
-    }
-
-    const filePath = join(designDir, fileName);
-    mkdirSync(dirname(filePath), { recursive: true });
-
-    const content = file.content || "";
-    writeFileSync(filePath, content, "utf-8");
-
-    manifest.files.push({ name: fileName, size: content.length, locked: file.locked || false });
-    console.log(`  ${fileName} (${content.length} bytes)`);
-  }
-
-  writeFileSync(join(designDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
-  console.log(`  manifest.json\n`);
-  console.log(`Done! ${files.length} files written to designs/${featureName}/\n`);
-  console.log(`Next steps:`);
-  console.log(`  1. Optionally create designs/${featureName}/notes.md`);
-  console.log(`  2. Run: /v0-setup ${featureName}`);
 }
 
-export { extractChatId, deriveFeatureName, parseArgs };
+export { extractChatId, deriveFeatureName, parseArgs, runPipeline };
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("fetch-v0.mjs")) {
   main().catch((err) => {

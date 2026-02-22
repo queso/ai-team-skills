@@ -94,11 +94,13 @@ The skill will walk you through naming your project, scaffold it from the templa
 
 Fetches v0.dev designs via the Platform API and adapts them into projects using Next.js App Router, Tailwind CSS v4, and shadcn/ui. The skill:
 
-- **Fetches v0 source code** — pulls files directly from v0's Platform API into `designs/<feature-name>/` (requires `V0_API_KEY`)
+- **Downloads v0 source code** — uses the zip download endpoint to reliably pull all source files into `designs/<feature-name>/v0-source/` (requires `V0_API_KEY`). This bypasses a known v0 API bug where inline JSON returns `"GENERATING"` placeholders instead of real file content.
+- **Smart version selection** — enumerates all chat versions and automatically selects the most recent completed version. Supports `--version <id>` to pin a specific version and `--list-versions` to inspect available versions.
+- **Classifies files** — separates custom files from v0's default scaffold files (shadcn components, configs) and reports the breakdown in `manifest.json`
+- **Detects placeholder content** — warns if downloaded files still contain `"GENERATING"` stubs and suggests trying an older version
 - **Analyzes project context** — reads CLAUDE.md, components.json, globals.css, and existing components to understand conventions
 - **Produces an adaptation brief** — inventories fetched files, checks shadcn component availability, and identifies theme alignment needs
 - **Adapts to project conventions** — follows a four-pass process (inventory, structural integration, theme alignment, verification)
-- **Replaces screenshot workflows** — uses actual v0 source code instead of Playwright screenshots
 
 #### Install
 
@@ -117,6 +119,33 @@ In Claude Code, run:
 ```
 
 The skill fetches the v0 design, analyzes it against your project, and walks through the adaptation process.
+
+#### CLI flags
+
+The underlying fetch script (`fetch-v0.mjs`) supports additional flags:
+
+```
+node fetch-v0.mjs <v0-url> [name] [--output-dir <path>] [--version <id>] [--list-versions]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output-dir <path>` | Base directory for `designs/<feature>/v0-source/`. Defaults to cwd. |
+| `--version <id>` | Download a specific version instead of the auto-selected best version. |
+| `--list-versions` | Print all available versions for the chat without downloading. |
+
+#### Architecture
+
+The fetch pipeline is composed of four modules in `v0-setup/scripts/`:
+
+| Module | Purpose |
+|--------|---------|
+| `version-list.mjs` | Enumerates chat versions with pagination and slug/hashId fallback |
+| `zip-download.mjs` | Downloads and extracts version zip archives with Zip Slip protection |
+| `file-filter.mjs` | Classifies files as custom vs. default and validates content |
+| `placeholder-detection.mjs` | Detects `"GENERATING"` and other placeholder content |
+
+These are orchestrated by `runPipeline()` in `fetch-v0.mjs`, which accepts injected dependencies for testability.
 
 ## Contributing
 
