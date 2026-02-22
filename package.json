@@ -1,0 +1,16 @@
+{
+  "name": "ai-team-skills",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "biome check .",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/bun": "latest",
+    "gray-matter": "^4.0.3"
+  }
+}

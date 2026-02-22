@@ -19,8 +19,8 @@
  *   - Generates a manifest.json listing all files pulled
  */
 
-import { writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const V0_API_BASE = "https://api.v0.dev/v1";
 
@@ -154,7 +154,10 @@ async function main() {
 
   for (const file of files) {
     const fileName = file.name || file.path;
-    if (!fileName) { console.warn("Skipping file with no name/path"); continue; }
+    if (!fileName) {
+      console.warn("Skipping file with no name/path");
+      continue;
+    }
 
     const filePath = join(designDir, fileName);
     mkdirSync(dirname(filePath), { recursive: true });
@@ -174,4 +177,11 @@ async function main() {
   console.log(`  2. Run: /v0-setup ${featureName}`);
 }
 
-main().catch((err) => { console.error("Fatal error:", err.message); process.exit(1); });
+export { extractChatId, deriveFeatureName, parseArgs };
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("fetch-v0.mjs")) {
+  main().catch((err) => {
+    console.error("Fatal error:", err.message);
+    process.exit(1);
+  });
+}
