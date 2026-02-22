@@ -4,13 +4,17 @@
  * fetch-v0.mjs — Pull source files from a v0.dev chat via the Platform API
  *
  * Usage:
- *   node scripts/fetch-v0.mjs <v0-url-or-chat-id> <feature-name>
+ *   node <skill-path>/scripts/fetch-v0.mjs <v0-url-or-chat-id> <feature-name> [--output-dir <path>]
  *
  * Requirements:
  *   - V0_API_KEY environment variable (get from v0.dev/chat/settings/keys)
  *
+ * Options:
+ *   --output-dir <path>  Base directory for designs/<feature-name>/
+ *                         Defaults to process.cwd() if not provided
+ *
  * Output:
- *   - Creates designs/<feature-name>/ directory
+ *   - Creates <output-dir>/designs/<feature-name>/ directory
  *   - Writes all v0 source files into it
  *   - Generates a manifest.json listing all files pulled
  */
@@ -19,6 +23,26 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 
 const V0_API_BASE = "https://api.v0.dev/v1";
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+  let inputArg = null;
+  let customName = null;
+  let outputDir = null;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--output-dir" && i + 1 < args.length) {
+      outputDir = args[i + 1];
+      i++;
+    } else if (!inputArg) {
+      inputArg = args[i];
+    } else if (!customName) {
+      customName = args[i];
+    }
+  }
+
+  return { inputArg, customName, outputDir: outputDir || process.cwd() };
+}
 
 function extractChatId(input) {
   const urlMatch = input.match(/v0\.(?:app|dev)\/chat\/([a-zA-Z0-9_-]+)/);
@@ -67,10 +91,14 @@ async function fetchVersion(chatId, versionId, apiKey) {
 }
 
 async function main() {
-  const [, , inputArg, customName] = process.argv;
+  const { inputArg, customName, outputDir } = parseArgs(process.argv);
 
   if (!inputArg) {
-    console.error("Usage: node scripts/fetch-v0.mjs <v0-url-or-chat-id> [feature-name]");
+    console.error("Usage: node fetch-v0.mjs <v0-url-or-chat-id> [feature-name] [--output-dir <path>]");
+    console.error("");
+    console.error("Options:");
+    console.error("  --output-dir <path>  Base directory for designs/<feature-name>/");
+    console.error("                       Defaults to current working directory");
     process.exit(1);
   }
 
@@ -83,11 +111,11 @@ async function main() {
 
   const chatId = extractChatId(inputArg);
   const featureName = customName || deriveFeatureName(chatId);
-  const outputDir = join(process.cwd(), "designs", featureName);
+  const designDir = join(outputDir, "designs", featureName);
 
   console.log(`Chat ID: ${chatId}`);
   console.log(`Feature: ${featureName}`);
-  console.log(`Output:  ${outputDir}\n`);
+  console.log(`Output:  ${designDir}\n`);
 
   console.log("Fetching chat metadata...");
   const chat = await fetchChat(chatId, apiKey);
@@ -113,7 +141,7 @@ async function main() {
   }
 
   console.log(`Found ${files.length} files\n`);
-  mkdirSync(outputDir, { recursive: true });
+  mkdirSync(designDir, { recursive: true });
 
   const manifest = {
     chatId,
@@ -128,22 +156,22 @@ async function main() {
     const fileName = file.name || file.path;
     if (!fileName) { console.warn("Skipping file with no name/path"); continue; }
 
-    const filePath = join(outputDir, fileName);
+    const filePath = join(designDir, fileName);
     mkdirSync(dirname(filePath), { recursive: true });
 
     const content = file.content || "";
     writeFileSync(filePath, content, "utf-8");
 
     manifest.files.push({ name: fileName, size: content.length, locked: file.locked || false });
-    console.log(`  ✓ ${fileName} (${content.length} bytes)`);
+    console.log(`  ${fileName} (${content.length} bytes)`);
   }
 
-  writeFileSync(join(outputDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
-  console.log(`  ✓ manifest.json\n`);
+  writeFileSync(join(designDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
+  console.log(`  manifest.json\n`);
   console.log(`Done! ${files.length} files written to designs/${featureName}/\n`);
   console.log(`Next steps:`);
   console.log(`  1. Optionally create designs/${featureName}/notes.md`);
-  console.log(`  2. Run: /adapt-v0 ${featureName}`);
+  console.log(`  2. Run: /v0-setup ${featureName}`);
 }
 
 main().catch((err) => { console.error("Fatal error:", err.message); process.exit(1); });

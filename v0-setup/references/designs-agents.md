@@ -12,7 +12,7 @@ input references, not part of the application build.
 
 ## Relationship to app code
 
-Files here are consumed by the `/adapt-v0` command, which reads the v0 export
+Files here are consumed by the `/v0-setup` skill, which reads the v0 export
 and `notes.md`, then creates adapted components in `app/` and `components/`.
 
 The v0 exports use shadcn/ui — the same component library this project uses —
