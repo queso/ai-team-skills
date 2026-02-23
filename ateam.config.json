@@ -1,0 +1,9 @@
+{
+  "packageManager": "bun",
+  "checks": {
+    "lint": "bun run lint",
+    "unit": "bun test"
+  },
+  "precheck": ["lint", "unit"],
+  "postcheck": ["lint", "unit"]
+}
