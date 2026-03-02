@@ -4,6 +4,39 @@ A collection of open-source [Claude Code](https://claude.ai/code) skills for sof
 
 ## Skills
 
+### address-pr-feedback
+
+Fetches all review comments on a pull request and systematically addresses them. The skill:
+
+- **Finds the PR automatically** from the current branch, or accepts a PR number/URL as an argument
+- **Fetches all feedback** — inline code review comments, conversation-level comments, and review summaries
+- **Filters noise** — skips bot comments, self-comments, resolved threads, and non-substantive reactions
+- **Categorizes every comment** into **Will Fix** (address now via TDD), **Won't Fix** (explain why), or **New Issue** (valid but out of scope)
+- **Confirms with you** before proceeding — you can adjust any categorization
+- **Fixes using TDD** — for each "Will Fix" item, writes a failing test first, implements the fix, then verifies the full test suite passes
+- **Commits and pushes** with a descriptive message referencing the PR number
+- **Summarizes everything** in a table showing what was done, what was declined, and what was deferred
+- **Optionally posts a PR comment** summarizing what feedback was addressed
+- **Optionally creates GitHub issues** for "New Issue" items
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@address-pr-feedback -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/address-pr-feedback
+/address-pr-feedback 42
+/address-pr-feedback https://github.com/owner/repo/pull/42
+```
+
+The skill will fetch all review comments, ask you to confirm its categorization, fix what needs fixing with TDD, and push the results.
+
 ### code-review
 
 Automated code review that checks unmerged changes on your current branch for:
