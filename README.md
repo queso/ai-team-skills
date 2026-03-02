@@ -10,7 +10,7 @@ Fetches all review comments on a pull request and systematically addresses them.
 
 - **Finds the PR automatically** from the current branch, or accepts a PR number/URL as an argument
 - **Fetches all feedback** — inline code review comments, conversation-level comments, and review summaries
-- **Filters noise** — skips bot comments, self-comments, resolved threads, and non-substantive reactions
+- **Filters noise** — skips self-comments, CI bots, resolved threads, and non-substantive reactions while keeping code review bot feedback (CodeRabbit, PR Agent, etc.)
 - **Categorizes every comment** into **Will Fix** (address now via TDD), **Won't Fix** (explain why), or **New Issue** (valid but out of scope)
 - **Confirms with you** before proceeding — you can adjust any categorization
 - **Fixes using TDD** — for each "Will Fix" item, writes a failing test first, implements the fix, then verifies the full test suite passes

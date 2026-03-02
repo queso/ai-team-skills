@@ -35,7 +35,7 @@ Collect comments from three GitHub API sources. Consult `references/gh-api-examp
 gh api repos/{owner}/{repo}/pulls/{number}/comments --paginate
 ```
 
-These are comments attached to specific lines in the diff. Capture: `id`, `body`, `path`, `line` (or `original_line`), `diff_hunk`, `user.login`, `user.type`, `created_at`, `in_reply_to_id`.
+These are comments attached to specific lines in the diff. Capture: `id`, `node_id`, `body`, `path`, `line` (or `original_line`), `diff_hunk`, `user.login`, `user.type`, `created_at`, `in_reply_to_id`. The `node_id` is needed later to look up thread IDs for resolution.
 
 ### 2b. Conversation-level comments
 
@@ -58,7 +58,7 @@ Extract actionable feedback from review summaries, especially those with `CHANGE
 Skip comments that are:
 
 - **From the PR author** — self-comments are usually context, not feedback
-- **Bot-generated** — check `user.type == "Bot"` or known bot logins like `github-actions`, `dependabot`, `codecov`
+- **CI/infrastructure bots** — skip bots that don't provide code review feedback (e.g., `github-actions`, `dependabot`, `codecov`, `netlify`, `vercel`). **Keep** comments from code review bots like `coderabbitai`, `pr-agent`, `codeclimate`, `sonarcloud`, etc. — these are valuable review feedback and should be categorized like any other reviewer
 - **Non-substantive** — less than 10 characters after stripping whitespace and emoji (pure reactions)
 - **Already resolved** — check review thread resolution status via `gh api repos/{owner}/{repo}/pulls/{number}/comments` and look for threads where the conversation has been marked resolved
 
@@ -115,7 +115,7 @@ Ask: "Here's how I'd categorize the feedback. Want to adjust any categories befo
 
 ## Step 4: Execute Fixes (TDD Style)
 
-For each "Will Fix" item, follow the TDD loop below.
+Delegate all coding work to **SDET subagents** — specialized test-and-fix agents. See `references/sdet-agent.md` for the full agent prompt.
 
 ### 4a. Detect the test framework (once)
 
@@ -126,27 +126,83 @@ Check the project for its test setup — cache the result for all fixes:
 - Examine existing test files for import patterns and naming conventions
 - Determine the test run command (e.g., `bun test`, `npm test`, `pytest`)
 
-### 4b. TDD loop for each fix
+This context will be included in every agent prompt so agents don't each have to rediscover it.
 
-1. **Read the relevant code** — open the file(s) referenced by the comment and understand current behavior
-2. **Write or update a test** — create a test capturing the expected behavior from the feedback. Add to an existing test file if one exists for the module; otherwise create one following the project's naming convention
-3. **Run the test to confirm it fails** — verify it fails for the expected reason. If it already passes, the behavior may already be correct — investigate and note this
-4. **Implement the fix** — make the minimal code change to address the feedback
-5. **Run the test to confirm it passes** — execute the specific test
-6. **Run the full test suite** — check for regressions. If an unrelated test breaks, investigate and fix before moving to the next item
+### 4b. Group fixes for parallelization
 
-### 4c. Non-testable fixes
+Analyze the "Will Fix" items and group them by file independence:
 
-If a "Will Fix" comment doesn't lend itself to a test (e.g., improving a log message, fixing a typo, updating documentation), skip the TDD loop and make the fix directly. Note this in the summary.
+- **Independent fixes** touch different files (or different, non-overlapping parts of the codebase). These can run in parallel.
+- **Dependent fixes** touch the same file or closely related code. These must be serialized within a single agent to avoid conflicts.
 
-### 4d. Track progress
+Create parallel groups. For example, if you have 5 fixes where #1 and #2 both touch `parser.ts`, and #3, #4, #5 each touch different files:
 
-For each fix, record:
+| Group | Fixes | Why |
+|-------|-------|-----|
+| Agent 1 | #1, #2 | Both touch `parser.ts` — run sequentially within one agent |
+| Agent 2 | #3 | Independent — `api.ts` |
+| Agent 3 | #4 | Independent — `validator.ts` |
+| Agent 4 | #5 | Independent — `utils.ts` |
 
-- Which comment it addresses (by ID and summary)
-- Which files were changed
-- Which tests were added or modified
+All agents run in parallel. Fixes within a single agent run sequentially.
+
+### 4c. Spawn SDET subagents
+
+For each parallel group, spawn a **general-purpose** subagent with `model: "sonnet"`. Launch all groups as **parallel Agent tool calls in a single message** to maximize concurrency.
+
+Each agent prompt must include:
+
+1. The SDET role and workflow from `references/sdet-agent.md`
+2. The test framework details from step 4a (framework, test command, file conventions)
+3. The specific "Will Fix" item(s) assigned to this agent, including:
+   - The reviewer's comment body
+   - The file path and line number (if an inline comment)
+   - The diff hunk for context (if available)
+4. Instructions to follow the TDD loop: write failing test, implement fix, verify, run full suite
+
+Example agent prompt structure:
+
+```
+You are an SDET agent. [Include references/sdet-agent.md content]
+
+## Project test setup
+- Framework: bun:test
+- Run command: bun test
+- Test location: tests/ directory
+- Naming convention: <module>.test.ts
+
+## Your assignments
+
+### Fix 1: Handle null input in parser
+- Reviewer: @reviewer1
+- File: src/parser.ts, line 42
+- Comment: "This should handle the null case — currently throws an unhandled TypeError"
+- Diff context: [include diff_hunk]
+
+Follow the TDD loop for each fix. Report back what you changed and whether all tests pass.
+```
+
+### 4d. Collect results
+
+As agents complete, collect their reports. Each agent should report:
+
+- Which comment(s) it addressed
+- Files changed (source and test)
+- Tests added or modified
 - Whether the full suite passes
+- Any issues encountered
+
+If any agent reports a failing test suite, spawn an additional SDET agent to resolve the issue before proceeding.
+
+### 4e. Final test suite run
+
+After all agents complete, run the full test suite once more to catch any cross-agent conflicts:
+
+```bash
+<test run command>
+```
+
+If tests fail, the most likely cause is parallel agents modifying shared imports or test fixtures. Spawn another SDET agent to fix the conflicts before proceeding.
 
 ## Step 5: Commit and Push
 
@@ -184,43 +240,9 @@ git pull --rebase && git push
 
 If the rebase produces conflicts, **stop and inform the user** rather than auto-resolving.
 
-## Step 6: Post Summary
+## Step 6: Reply, Resolve, and Summarize
 
-### 6a. Summary table
-
-Present a complete summary to the user:
-
-**Will Fix (N items) — All addressed**
-
-| Comment | Author | What was done | Files changed |
-|---------|--------|---------------|---------------|
-| "Handle null input..." | reviewer1 | Added null check + test | src/parser.ts, tests/parser.test.ts |
-
-**Won't Fix (N items)**
-
-| Comment | Author | Reason |
-|---------|--------|--------|
-| "Use const instead of let" | reviewer3 | Project convention uses let for reassigned variables |
-
-**New Issue (N items)**
-
-| Comment | Author | Suggested issue title |
-|---------|--------|----------------------|
-| "Factory pattern would help" | reviewer2 | Refactor: Extract factory for widget creation |
-
-Include test results and the commit SHA: "All N tests passing (M new, K modified). Commit `abc1234` pushed to branch `feature/my-branch`."
-
-### 6b. Post a PR comment (optional)
-
-Ask: "Want me to post a summary comment on the PR listing what was addressed?"
-
-If yes, use `gh pr comment {number} --body "..."` to post a markdown comment with:
-
-- Which comments were addressed (with what was changed)
-- Which were categorized as Won't Fix (with brief explanations)
-- Which were deferred as New Issues
-
-### 6c. Create issues for "New Issue" items (optional)
+### 6a. Create issues for "New Issue" items (optional)
 
 Ask: "Want me to create GitHub issues for the N 'New Issue' items?"
 
@@ -230,4 +252,112 @@ If yes, for each item:
 gh issue create --title "<suggested title>" --body "<context from review comment, link to PR>"
 ```
 
-Report back the created issue numbers and URLs.
+Do this **before** posting replies so the inline replies can reference the created issue numbers.
+
+### 6b. Draft replies for user approval
+
+For each categorized comment, draft a reply. Present **all** drafted replies to the user in a table for review before posting anything.
+
+**Will Fix** replies — reference what was changed and the commit:
+
+```
+Fixed in <commit-sha>. Added null check for the input parameter and a test covering the empty input case.
+```
+
+**Won't Fix** replies — explain the reasoning concisely:
+
+```
+Keeping the current approach — the project convention uses `let` for variables that get reassigned in this pattern. See the style guide in CONTRIBUTING.md.
+```
+
+**New Issue** replies — reference the created issue (or explain the deferral):
+
+```
+Good catch — this predates this PR so I've split it into a dedicated issue: #89
+```
+
+Or if no issue was created:
+
+```
+Valid point, but this is outside the scope of this PR — the factory pattern would require refactoring across several modules. Recommend addressing it as a follow-up.
+```
+
+Present the drafts as a table:
+
+| # | Comment (truncated) | Category | Drafted Reply |
+|---|---------------------|----------|---------------|
+| 1 | "This should handle null..." | Will Fix | Fixed in abc1234. Added null check + test for empty input. |
+| 2 | "Consider using a factory..." | New Issue | Deferred to #89 — requires refactoring beyond this PR's scope. |
+| 3 | "I'd prefer const here..." | Won't Fix | Keeping current approach — project convention uses let for reassigned vars. |
+
+Ask: "Here are the replies I'd post to each thread. Want to edit any of these before I send them?"
+
+**Wait for the user to confirm or adjust before posting.**
+
+### 6c. Post approved replies
+
+After the user approves, post each reply. Use the GitHub API to reply to the specific comment by its ID. See `references/gh-api-examples.md` for the exact API calls.
+
+- **Inline review comments** (have a `path` and `line`) — reply in the thread using the review comment replies endpoint
+- **Conversation-level comments** (not inline) — post a reply using the issues comment endpoint
+
+### 6d. Resolve completed threads
+
+After replying to each inline thread, resolve it to mark it as addressed. Thread resolution requires the GraphQL API:
+
+```bash
+gh api graphql -f query='
+  mutation {
+    resolveReviewThread(input: {threadId: "<thread_node_id>"}) {
+      thread { isResolved }
+    }
+  }
+'
+```
+
+To get the `thread_node_id`, use the `node_id` field from the **first comment in the thread** (the root comment, not replies). This is the `pullRequestReviewThread` node ID.
+
+If the root comment's `node_id` is for an individual comment rather than a thread, query for the thread ID first:
+
+```bash
+gh api graphql -f query='
+  query {
+    node(id: "<comment_node_id>") {
+      ... on PullRequestReviewComment {
+        pullRequestReviewThread {
+          id
+          isResolved
+        }
+      }
+    }
+  }
+'
+```
+
+Then use the returned thread `id` in the `resolveReviewThread` mutation.
+
+Resolve threads for **all three categories** — Will Fix, Won't Fix, and New Issue — since each has been explicitly addressed with a reply.
+
+### 6e. Summary table
+
+Present a complete summary to the user:
+
+**Will Fix (N items) — All addressed**
+
+| Comment | Author | What was done | Files changed | Thread |
+|---------|--------|---------------|---------------|--------|
+| "Handle null input..." | reviewer1 | Added null check + test | src/parser.ts, tests/parser.test.ts | Replied + resolved |
+
+**Won't Fix (N items)**
+
+| Comment | Author | Reason | Thread |
+|---------|--------|--------|--------|
+| "Use const instead of let" | reviewer3 | Project convention uses let for reassigned variables | Replied + resolved |
+
+**New Issue (N items)**
+
+| Comment | Author | Suggested issue title | Thread |
+|---------|--------|----------------------|--------|
+| "Factory pattern would help" | reviewer2 | Refactor: Extract factory for widget creation (#89) | Replied + resolved |
+
+Include test results and the commit SHA: "All N tests passing (M new, K modified). Commit `abc1234` pushed to branch `feature/my-branch`."

@@ -16,6 +16,7 @@ Response shape (array):
 [
   {
     "id": 1234567,
+    "node_id": "PRR_kwDOABC123",
     "body": "This should handle the null case.",
     "path": "src/parser.ts",
     "line": 42,
@@ -31,6 +32,7 @@ Response shape (array):
   },
   {
     "id": 1234568,
+    "node_id": "PRR_kwDOABC124",
     "body": "Good point, I'll fix that.",
     "path": "src/parser.ts",
     "line": 42,
@@ -130,20 +132,115 @@ gh pr view {number} --json state --jq '.state'
 # Output: "OPEN", "CLOSED", or "MERGED"
 ```
 
-## Posting a PR Comment
+## Replying to Inline Review Comments
+
+Reply directly in an existing review comment thread using the comment ID:
 
 ```bash
-gh pr comment {number} --body "## Feedback Summary
-
-### Will Fix (addressed)
-- Fixed null handling in parser (abc1234)
-
-### Won't Fix
-- Style preference on const vs let — project uses let for reassigned vars
-
-### New Issue (deferred)
-- Factory pattern refactor → #89"
+gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies \
+  -f body="Fixed in abc1234. Added null check and a test for the empty input case."
 ```
+
+This posts a reply that appears in the same thread as the original inline comment. Use the `id` field from the original comment (the numeric ID, not `node_id`).
+
+## Replying to Conversation-Level Comments
+
+For comments on the PR conversation tab (fetched from the issues endpoint), reply by posting a new issue comment:
+
+```bash
+gh api repos/{owner}/{repo}/issues/{number}/comments \
+  -f body="Addressed — see abc1234 for the fix and the new test coverage."
+```
+
+This appears as a new comment in the conversation tab. There is no threading for issue-level comments, so reference the original comment or reviewer to make it clear what you're responding to.
+
+## Resolving Review Threads
+
+Thread resolution uses the GraphQL API. You need the thread's node ID.
+
+### Step 1: Get the thread ID from a comment
+
+Each inline review comment has a `node_id` field. Use it to look up the parent thread:
+
+```bash
+gh api graphql -f query='
+  query {
+    node(id: "PRR_kwDOABC123") {
+      ... on PullRequestReviewComment {
+        pullRequestReviewThread {
+          id
+          isResolved
+        }
+      }
+    }
+  }
+'
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "node": {
+      "pullRequestReviewThread": {
+        "id": "PRRT_kwDOABC456",
+        "isResolved": false
+      }
+    }
+  }
+}
+```
+
+### Step 2: Resolve the thread
+
+```bash
+gh api graphql -f query='
+  mutation {
+    resolveReviewThread(input: {threadId: "PRRT_kwDOABC456"}) {
+      thread {
+        isResolved
+      }
+    }
+  }
+'
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "resolveReviewThread": {
+      "thread": {
+        "isResolved": true
+      }
+    }
+  }
+}
+```
+
+### Batch resolution
+
+To resolve multiple threads efficiently, you can combine mutations:
+
+```bash
+gh api graphql -f query='
+  mutation {
+    t1: resolveReviewThread(input: {threadId: "PRRT_id1"}) {
+      thread { isResolved }
+    }
+    t2: resolveReviewThread(input: {threadId: "PRRT_id2"}) {
+      thread { isResolved }
+    }
+    t3: resolveReviewThread(input: {threadId: "PRRT_id3"}) {
+      thread { isResolved }
+    }
+  }
+'
+```
+
+This resolves all threads in a single API call.
 
 ## Creating Issues
 
