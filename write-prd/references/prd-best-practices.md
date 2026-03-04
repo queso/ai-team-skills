@@ -28,7 +28,7 @@ Grounded in data. Names the user. Explains why it matters.
 
 ---
 
-## 2. Business Context
+## 2. Context & Background
 
 ### Bad
 ```
@@ -41,12 +41,17 @@ HiPPO (highest-paid person's opinion) is not business context. It might be the *
 Social sharing directly supports Q1 OKR: "Increase organic acquisition by 20%."
 Current organic traffic is 30% of total — we need it at 36% to hit the target.
 Paid acquisition costs have risen 40% YoY, making organic channels critical.
+
+Why now: Our main competitor launched social sharing last quarter and is gaining
+ground in organic search. Our SEO team reports a 12% drop in organic share of
+voice since their launch.
 ```
-Tied to measurable business goals. Explains the "why now."
+Tied to measurable business goals. Explains the "why now" — what changed that makes this urgent.
 
 ### What to watch for
 - No business context at all — the most common PRD failure
 - Circular reasoning: "We need this because we decided to build it"
+- Missing "why now": if it's been a problem for years, what changed?
 - Missing opportunity cost: what are we *not* building to do this?
 
 ---
@@ -177,7 +182,109 @@ Edge Cases:
 
 ---
 
-## 7. Common PRD Anti-Patterns
+## 7. Design Principles
+
+### Bad
+```
+Design Principles:
+- Use a modal dialog for the share interface
+- Put the buttons in the top-right corner
+- Use blue for the Facebook button and black for the X button
+```
+These are implementation decisions, not principles. They prescribe specific UI elements rather than guiding philosophy.
+
+### Good
+```
+Design Principles:
+- Progressive disclosure: Show the share button prominently; reveal platform options on interaction.
+- Zero-friction sharing: The shortest path from "I want to share" to "shared" should be 2 taps max.
+- Platform-native behavior: Use each platform's native share mechanism rather than custom implementations.
+- Graceful degradation: If a sharing method isn't available (e.g., popups blocked), fall back silently to the next best option.
+```
+These are *philosophies* that guide many design decisions. They help the team make consistent choices without the PRD covering every scenario.
+
+### What to watch for
+- Principles that are actually implementation decisions (colors, positions, specific UI elements)
+- Principles so vague they're useless ("make it user-friendly")
+- Too many principles — 3-5 is usually right
+
+---
+
+## 8. Solution Approach
+
+### Bad
+```
+Solution Approach:
+We'll create a ShareButton React component that renders inside a Portal.
+It will use the navigator.share() Web API with a fallback to custom share
+dialogs. Share counts will be cached in Redis with a 5-minute TTL.
+The component will be lazy-loaded using React.lazy() to avoid impacting
+bundle size.
+```
+This is implementation detail — specific technologies, APIs, caching strategies, and code patterns. It belongs in a technical design doc, not a PRD.
+
+### Good
+```
+Solution Approach:
+Share buttons will be added to product detail pages, positioned near the
+product title for high visibility. When a user clicks share, they'll be
+presented with platform-specific sharing options (Facebook, X, copy link).
+
+The sharing flow will leverage each platform's native sharing mechanism
+to pre-populate the product name, image, and link — minimizing effort for
+the user.
+
+Share activity will be tracked to measure adoption and inform future
+social features (e.g., "trending products" based on share volume).
+```
+Strategy-level: describes *what happens* and *why*, not *how it's built*. A product manager can read this and understand the approach without knowing React or Redis.
+
+### What to watch for
+- Technology names, library references, or code patterns — move these to a tech design doc
+- Database schemas, API contracts, or caching strategies — too detailed for a PRD
+- Confusing *approach* with *architecture* — the PRD should describe the user-facing strategy
+
+---
+
+## 9. Technical Considerations
+
+### Bad
+```
+Technical Considerations:
+We'll use a microservice architecture with an event-driven share
+notification pipeline. The ShareService will expose a gRPC endpoint
+for internal consumers and a REST API for the frontend. We'll need
+a new PostgreSQL table: shares(id, product_id, platform, created_at).
+```
+This is architecture, not considerations. It makes engineering decisions that should be made during implementation.
+
+### Good
+```
+Technical Considerations:
+
+Constraints:
+- Must work on all supported browsers (Chrome, Firefox, Safari, Edge — last 2 versions)
+- Page load impact budget: < 50ms additional load time, zero CLS
+- Must comply with GDPR — no tracking without cookie consent
+
+Dependencies:
+- Open Graph meta tags require server-side rendering changes (coordinate with Platform team)
+- Analytics tracking depends on the event pipeline shipping in Q1 (currently on track)
+
+Integration points:
+- Product catalog service (for product metadata in share previews)
+- Analytics pipeline (for share event tracking)
+```
+Captures constraints and dependencies that affect product decisions without prescribing architecture.
+
+### What to watch for
+- Architecture decisions disguised as "considerations" — if it names a specific technology choice, it's probably too detailed
+- Missing constraints that will surprise the team later (browser support, performance budgets, compliance)
+- Dependencies listed without owners or status — who's responsible, and is it on track?
+
+---
+
+## 10. Common PRD Anti-Patterns
 
 **Solution-first PRDs:** Start with "Build X" instead of "Users have problem Y." Flip it. The solution should emerge from the requirements, not precede them.
 
@@ -187,24 +294,31 @@ Edge Cases:
 
 **Kitchen-sink PRDs:** Trying to solve everything in one document. If the PRD has 50+ requirements, it should probably be split into phases or separate PRDs.
 
+**Over-templating:** A bug fix PRD with 11 sections is wasted effort. Match the template depth to the feature's complexity. A Quick-tier PRD (Problem, Scope, Requirements) is perfectly valid for small changes. Don't let process overhead kill velocity.
+
 **Write-once PRDs:** A PRD is a living document. It should be updated as assumptions are validated or invalidated. Mark sections as "Updated [date]: [reason]" so readers know what changed.
 
 **No stakeholder input:** PRDs written in isolation miss critical context. Talk to support (what do users complain about?), sales (what do prospects ask for?), and engineering (what's feasible?) before writing.
 
 ---
 
-## 8. Quality Checklist
+## 11. Quality Checklist
 
 Before finalizing a PRD, verify:
 
 - [ ] Problem statement names a user and a measurable impact
-- [ ] Business context ties to a company goal or metric
+- [ ] Context & Background ties to a business goal and explains "why now"
 - [ ] Every success metric has a current baseline and a target
+- [ ] Target users and use cases are clearly identified
 - [ ] Scope has both "in" and "out" sections
-- [ ] Every functional requirement is testable (you could write an acceptance test)
+- [ ] Every functional requirement is testable (you could write a test for it)
 - [ ] Non-functional requirements are specified (performance, security, accessibility)
-- [ ] Edge cases and error states are enumerated
-- [ ] Dependencies are listed with owners/status
+- [ ] Edge cases and error states are enumerated under Requirements
+- [ ] Design principles (if included) are philosophies, not implementation decisions
+- [ ] Solution approach (if included) stays at strategy level — no code or architecture
+- [ ] Technical constraints and dependencies are captured with owners/status
+- [ ] Risks are assessed with likelihood, impact, and mitigation
 - [ ] Open questions are captured (not swept under the rug)
 - [ ] No implementation details leaked into requirements
+- [ ] Template depth matches the feature's complexity (not over- or under-templated)
 - [ ] The document is understandable by someone who wasn't in the room when it was discussed
