@@ -58,7 +58,7 @@ Extract actionable feedback from review summaries, especially those with `CHANGE
 Skip comments that are:
 
 - **From the PR author** — self-comments are usually context, not feedback
-- **CI/infrastructure bots** — skip bots that don't provide code review feedback (e.g., `github-actions`, `dependabot`, `codecov`, `netlify`, `vercel`). **Keep** comments from code review bots like `coderabbitai`, `pr-agent`, `codeclimate`, `sonarcloud`, etc. — these are valuable review feedback and should be categorized like any other reviewer
+- **CI/infrastructure bots** — skip bots that don't provide code review feedback (e.g. `dependabot`, `codecov`, `netlify`, `vercel`). **Keep** comments from code review bots like `coderabbitai`, `github-actions`, `pr-agent`, `codeclimate`, `sonarcloud`, etc. — these are valuable review feedback and should be categorized like any other reviewer
 - **Non-substantive** — less than 10 characters after stripping whitespace and emoji (pure reactions)
 - **Already resolved** — check review thread resolution status via `gh api repos/{owner}/{repo}/pulls/{number}/comments` and look for threads where the conversation has been marked resolved
 
