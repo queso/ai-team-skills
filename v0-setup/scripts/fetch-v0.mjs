@@ -299,7 +299,7 @@ async function main() {
   }
 }
 
-export { extractChatId, deriveFeatureName, parseArgs, runPipeline };
+export { deriveFeatureName, extractChatId, parseArgs, runPipeline };
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("fetch-v0.mjs")) {
   main().catch((err) => {
