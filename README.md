@@ -298,16 +298,37 @@ PRs welcome. Each skill lives in its own directory:
 ```
 skill-name/
 ├── SKILL.md              # Skill definition (frontmatter + instructions)
-└── references/           # Optional reference docs loaded as context
-    └── *.md
+├── references/           # Optional reference docs loaded as context
+│   └── *.md
+└── scripts/              # Optional hooks or helpers the skill documents
 ```
+
+A skill directory is a shipping unit — installing the skill copies it verbatim
+into the user's skills directory, so everything inside it reaches everyone who
+installs it. Supporting material stays out:
+
+```
+evals/<skill-name>/       # Eval harnesses and fixtures
+prd/                      # PRDs
+tests/                    # Repo test suite
+```
+
+This matters more than it looks. The Skills CLI walks five directory levels and
+registers every `SKILL.md` it finds by frontmatter `name:`, so a nested one is
+offered to users as an installable skill wherever it sits — and if its name
+collides with a real skill, it can be installed in place of it. Files under
+`evals/` that must be named `SKILL.md` (promptdiff arms, for instance) carry no
+frontmatter for that reason. `tests/repo-hygiene.test.ts` enforces both rules,
+and `CLAUDE.md` has the full explanation.
 
 ### Adding a new skill
 
 1. Create a directory with your skill name
 2. Add a `SKILL.md` with `name` and `description` in the frontmatter
 3. Add reference files if the skill needs domain-specific examples
-4. Submit a PR
+4. Keep evals, fixtures, and PRDs outside the skill directory
+5. Run `bun run check && bun test`
+6. Submit a PR
 
 ## License
 
