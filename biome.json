@@ -2,7 +2,14 @@
   "$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!node_modules/", "!dist/", "!bun.lock"]
+    "includes": [
+      "**",
+      "!node_modules/",
+      "!dist/",
+      "!bun.lock",
+      "!handoff/evals/fixture/",
+      "!handoff/evals/fixture-long/"
+    ]
   },
   "linter": {
     "enabled": true,
