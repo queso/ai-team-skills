@@ -77,7 +77,7 @@ Captures the session's working state to a progress file so you can clear a bloat
 - **Emits a self-test** — a `progress.checks.md` of questions answerable only from the pre-clear session, so information loss becomes a number instead of a feeling
 - **Guards against staleness and bloat** — the file stamps repo, branch, and timestamp; a progress file from another branch, from days ago, or grown past a size cap warns instead of loading
 - **Archives on completion** — `/handoff done` moves the file to `.handoff/progress-archive/` rather than deleting it
-- **Reloads automatically** — an optional `SessionStart` hook re-injects the progress file, so resuming needs nothing remembered
+- **Reloads automatically** — a `SessionStart` hook re-injects the progress file, so resuming needs nothing remembered. `/handoff install` registers it, because nothing else will
 
 This is not a replacement for auto-compaction so much as a better-timed, curated alternative to it: compaction fires late and does not let you choose what survives.
 
@@ -95,13 +95,24 @@ In Claude Code, run:
 /handoff
 /handoff done
 /handoff check
+/handoff install
 ```
 
 `/handoff` writes `.handoff/progress.md` and `.handoff/progress.checks.md`. Clear the context, resume, then `/handoff check` scores the resumed session against the checks to show what the handoff dropped. `/handoff done` archives everything when the work is finished.
 
 #### Session hook
 
-To reload the progress file automatically on every new session, add to `settings.json`:
+`scripts/session-start.sh` re-injects the progress file at the start of every new session, so resuming needs nothing remembered.
+
+**It does not install itself, and nothing installs it for you.** `skills add` copies a skill directory and stops — it has no hook-installation mechanism — so until the hook is written into a settings file it ships as an inert script and the skill quietly behaves as though it had none. Register it with:
+
+```
+/handoff install
+```
+
+which runs `scripts/install-hook.sh`. That writes to `~/.claude/settings.json` by default; `--local` targets `~/.claude/settings.local.json`, `--project` the current repo, `--target <file>` anything else. It is idempotent, backs the file up before writing, follows a symlinked settings file to its real path instead of replacing the link, and reverses with `--uninstall`. It needs `python3`.
+
+The equivalent by hand, in `settings.json`:
 
 ```json
 {

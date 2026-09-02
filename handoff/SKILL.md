@@ -20,12 +20,13 @@ This is not a substitute for auto-compaction — it is a better-timed, curated r
 - `/handoff` — write or rewrite the progress file
 - `/handoff done` — archive the progress file and clear it (work finished, or moving to something else)
 - `/handoff check` — score a resumed session against the checks file
+- `/handoff install` — register the session hook, so the progress file reloads by itself
 
 ---
 
 ## Step 1: Decide which mode is running
 
-If the argument is `done`, go to **Step 7**. If it is `check`, go to **Step 8**. Otherwise continue.
+If the argument is `done`, go to **Step 7**. If it is `check`, go to **Step 8**. If it is `install`, go to **Step 9**. Otherwise continue.
 
 ## Step 2: Locate the progress file
 
@@ -176,6 +177,22 @@ Run this in a **resumed** session, after clearing and reloading the progress fil
 
 A miss is not a failure of the resumed session — it is a defect in the progress file. Every miss should produce a concrete fix to the template or to what Step 4 and Step 5 chose to record. Say what that fix is.
 
+## Step 9: `/handoff install`
+
+Register the session hook. Run `scripts/install-hook.sh` from this skill's own directory:
+
+```bash
+bash "$CLAUDE_SKILL_DIR/scripts/install-hook.sh"
+```
+
+If that variable is not set, use the directory this `SKILL.md` was loaded from. The script writes to `~/.claude/settings.json` by default; pass `--local` for `~/.claude/settings.local.json` (machine-local, usually gitignored), `--project` for the current repo's `.claude/settings.json`, or `--target <file>` for anything else. Ask which scope the user wants only if they have not already said — otherwise take the default.
+
+It is idempotent. Re-running reports "already registered" and changes nothing, so it is safe to offer whenever the hook does not appear to be firing. Report what it printed, and that a new session or `/clear` is needed for the hook to take effect.
+
+`--uninstall` reverses it. `--dry-run` prints the resulting file without writing.
+
+If the script is missing — an older install, or a copy that did not ship it — fall back to editing the settings file directly with the JSON in **The session hook** below.
+
 ## The session hook
 
 `scripts/session-start.sh` reloads the progress file automatically when a new session starts, so resuming requires nothing to remember.
@@ -188,7 +205,11 @@ It refuses to inject in three cases, each of which is worse than staying quiet:
 - **stale** — a file from a different branch or from days ago arrives looking current
 - **oversized** — a bloated file re-injected on every session is exactly the context bloat this skill exists to prevent
 
-Wire it up in `settings.json`:
+### Installing it
+
+`/handoff install` (Step 9) is the supported path. Nothing registers this hook on your behalf: `skills add` copies a skill directory and stops — it has no hook-installation mechanism at all — so until something writes it into a settings file, `session-start.sh` ships as an inert file and the skill silently behaves as though it had no hook.
+
+The equivalent by hand, in `settings.json`:
 
 ```json
 {
@@ -209,4 +230,4 @@ Wire it up in `settings.json`:
 
 Tunable with `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000, roughly 6k tokens), and `HANDOFF_IGNORE_BRANCH=1` to skip the branch check.
 
-The script needs `jq` or `python3` to emit its JSON payload. With neither available it exits silently rather than printing text that would be mistaken for context.
+The script needs `jq` or `python3` to emit its JSON payload. With neither available it exits silently rather than printing text that would be mistaken for context. `install-hook.sh` requires `python3` specifically, and prints the JSON block above if it is missing.
