@@ -1,0 +1,20 @@
+{
+  "_note": "Each question lists ALTERNATIVE acceptable substrings, matched case-insensitively; any one counts. Single-string matching produced false negatives.",
+  "recall": {
+    "q1": ["worker.ts"],
+    "q2": ["replica"],
+    "q3": ["redis"],
+    "q4": ["handleordercreated", "handlers.ts"],
+    "q5": ["idempoten"],
+    "q6": ["ref_idempotency", "ref_"]
+  },
+  "unrecoverable": ["q2", "q3", "q6"],
+  "consume": {
+    "blocker surfaced": ["column", "nam"],
+    "knew Redis was vetoed": ["redis"],
+    "knew in-memory vetoed": ["memor"],
+    "targets right file": ["schema.ts"],
+    "RE-PROPOSED a vetoed fix": ["redis", "in-memory"],
+    "carried a distractor": []
+  }
+}
