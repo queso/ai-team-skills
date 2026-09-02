@@ -1,8 +1,3 @@
----
-name: save-progress
-description: Writes a summary of the current work to a progress file before the context is cleared.
----
-
 # Save Progress
 
 The context is about to be cleared. Write a summary of the current state of this

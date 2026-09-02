@@ -7,8 +7,8 @@
       "!node_modules/",
       "!dist/",
       "!bun.lock",
-      "!handoff/evals/fixture/",
-      "!handoff/evals/fixture-long/"
+      "!evals/handoff/fixture/",
+      "!evals/handoff/fixture-long/"
     ]
   },
   "linter": {

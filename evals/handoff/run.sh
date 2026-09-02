@@ -34,6 +34,25 @@ case "$FIXTURE" in
 esac
 [ -d "$FIX_DIR" ] || { echo "no fixture at $FIX_DIR" >&2; exit 1; }
 
+# The proposed arm IS the shipped skill, materialized here at run time rather
+# than checked in. It used to be a symlink, but any directory holding a SKILL.md
+# is a discoverable skill: `skills add` walks 5 levels deep and registers by
+# frontmatter name, so this directory competed with the real `handoff` for that
+# name and could win — installing an arm directory that has no scripts/, and so
+# no SessionStart hook. Generating it keeps the arm identical to what ships and
+# keeps the path shape symmetric with the baseline arm (promptdiff inlines each
+# skill under a header naming its resolved path, so an asymmetric path would be
+# an asymmetric prompt), while leaving nothing in the tree to discover.
+# Frontmatter is dropped on the way in, matching the other arms: promptdiff
+# strips it before inlining, so the prompt is unchanged either way, and a copy
+# without a `name:` is not registrable even while it exists mid-run.
+REAL_SKILL="$EVAL_DIR/../../handoff/SKILL.md"
+[ -f "$REAL_SKILL" ] || { echo "no skill at $REAL_SKILL" >&2; exit 1; }
+mkdir -p "$EVAL_DIR/arms/proposed"
+awk 'NR==1 && $0=="---" {fm=1; next} fm && $0=="---" {fm=0; skipblank=1; next}
+     fm {next} skipblank && NF==0 {next} {skipblank=0; print}' \
+  "$REAL_SKILL" > "$EVAL_DIR/arms/proposed/SKILL.md"
+
 # Outside the repo: headless claude walks UP from its cwd collecting CLAUDE.md,
 # and this repository's own CLAUDE.md would land in every run.
 WORK="${HANDOFF_EVAL_WORK:-${TMPDIR:-/tmp}/handoff-eval-$FIXTURE}"

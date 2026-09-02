@@ -52,7 +52,7 @@ pointer that replaces a conclusion does not save anything — it defers the cost
 the reader, who then has to go dereference it. A handoff is written once and read
 once, so work moved from writing to reading is not work saved.
 
-This is measured, not assumed. In `evals/`, a version of this skill that led with
+This is measured, not assumed. In `evals/handoff/`, a version of this skill that led with
 line-precise pointers cost the resuming agent **52% more tokens and 28% more
 turns** than a plain prose summary, with no improvement in what it got right. The
 extra reading was the pointers being followed.
