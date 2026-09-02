@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- New `review-repo` skill: reports open pull requests and local branches that are unpushed, PR-less, or already merged, collecting the GitHub and local views in parallel subagents and cross-referencing them into one bucketed picture
+- New `review-issues` skill: finds open issues with no review label and no attached pull request, then sizes each in its own subagent against fixed effort bands (XS-XL) to rank them easiest to hardest. Linked-PR detection uses the GraphQL timeline, since `gh issue list --json` exposes no field for it
 - New zip download pipeline for v0-setup fetch script, bypassing the broken inline JSON API (#WI-144)
 - Modular architecture: `version-list.mjs`, `zip-download.mjs`, `file-filter.mjs`, `placeholder-detection.mjs` (#WI-142, #WI-143, #WI-144, #WI-145)
 - `--version <id>` flag to fetch a specific v0 chat version (#WI-146)

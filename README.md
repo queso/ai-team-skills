@@ -66,6 +66,59 @@ In Claude Code, run:
 
 The skill will detect your base branch, diff all unmerged changes, and return a structured review.
 
+### review-repo
+
+Reports what is in flight in a repository — open pull requests and local branches that are unpushed, PR-less, or already merged. The skill:
+
+- **Collects both views in parallel subagents** — GitHub's (`gh pr list`) and the local checkout's (`git for-each-ref`, `git branch --merged/--no-merged`, `git worktree list`) — so pages of command output stay out of your main context and only the conclusions come back
+- **Cross-references them** on branch name, so a pushed branch with no PR and a PR with no local branch are both visible
+- **Buckets every branch** into At risk (never pushed), Needs a PR, Needs attention (failing, conflicted, or changes requested), Waiting on others, Draft, or Deletable
+- **Leads with what actually costs something** — a branch that exists only on your machine, and a PR that is blocking someone else
+- **Reads only** — never pushes, deletes, merges, or closes; it tells you the command and lets you run it
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@review-repo -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/review-repo
+```
+
+Works without a GitHub remote too — it falls back to the branch half using plain `git`.
+
+### review-issues
+
+Finds open issues nobody has picked up and ranks them easiest to hardest. The skill:
+
+- **Detects genuinely unclaimed issues** — no review label, and no pull request attached. Linked-PR data lives only in GitHub's GraphQL timeline (`gh issue list --json` has no field for it), so the skill queries it properly instead of guessing from titles
+- **Treats an abandoned PR as available again** — a linked PR that was *closed unmerged* does not disqualify an issue, but is called out, because why it was abandoned is usually worth knowing before starting again
+- **Sizes each candidate in its own subagent** that reads the actual code — which files it touches, whether tests exist there, whether there is a migration or API change hiding in it
+- **Uses fixed effort bands** (XS through XL) so estimates from independent subagents are comparable
+- **Separates "hard" from "underspecified"** — a low-confidence estimate is information about the issue, and those get a "do not start" rather than a big number
+- **Caps and says so** — never silently truncates a long board
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@review-issues -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/review-issues
+/review-issues owner/repo
+/review-issues --label triage
+```
+
 ### write-prd
 
 Creates a new Product Requirements Document with auto-numbered filenames. The skill:
