@@ -8,9 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- New `handoff` skill: captures session working state to `.claude/progress.md` so a bloated context can be cleared and resumed cheaply
-- `handoff` writes a companion `.claude/progress.checks.md` so information loss across a clear is measurable rather than assumed
-- `handoff` falls back to `progress.md` at the repository root when `.claude/` cannot be written (sandboxed, headless, and CI environments deny it, and the skill previously produced no file at all)
+- New `handoff` skill: captures session working state to `.handoff/progress.md` so a bloated context can be cleared and resumed cheaply. Deliberately not `.claude/` — that path is guarded and writes to it are denied in sandboxed, headless, and CI contexts (verified: in one headless run with identical permissions, `.handoff/progress.md` was written and `.claude/progress.md` was blocked as a sensitive file), and it is Claude Code's configuration directory rather than a place for session state
+- `handoff` writes a companion `.handoff/progress.checks.md` so information loss across a clear is measurable rather than assumed
 - `handoff/evals/`, a manual three-stage promptdiff eval with two fixtures (short, and a long one built around a mid-session reversed decision): one agent writes a handoff from a synthetic session; a second answers fixed questions from that handoff alone; a third has to act on it (surface the open decision, avoid re-proposing a vetoed approach) while its ingest cost is measured. Not wired into CI — it spends real tokens
 - `handoff/scripts/session-start.sh`, an optional `SessionStart` hook that reloads the progress file via `hookSpecificOutput.additionalContext` and warns via `systemMessage` instead of injecting when the file is stale (branch mismatch, older than `HANDOFF_MAX_AGE_DAYS`) or oversized (past `HANDOFF_MAX_BYTES`)
 - New zip download pipeline for v0-setup fetch script, bypassing the broken inline JSON API (#WI-144)

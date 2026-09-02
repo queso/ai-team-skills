@@ -5,7 +5,7 @@ description: Writes the session's working state to a progress file so you can cl
 
 # Handoff
 
-Capture the current work state into `.claude/progress.md`, so the conversation can be cleared and resumed at a fraction of the token cost.
+Capture the current work state into `.handoff/progress.md`, so the conversation can be cleared and resumed at a fraction of the token cost.
 
 ## Why this exists
 
@@ -29,13 +29,13 @@ If the argument is `done`, go to **Step 7**. If it is `check`, go to **Step 8**.
 
 ## Step 2: Locate the progress file
 
-The progress file lives at `.claude/progress.md`, relative to the repository root (`git rev-parse --show-toplevel`). If not in a git repository, use the current working directory and say so.
+The progress file lives at `.handoff/progress.md`, relative to the repository root (`git rev-parse --show-toplevel`). If not in a git repository, use the current working directory and say so.
 
-Create `.claude/` if it does not exist. If `.claude/progress.md` does not exist, this is the first handoff for this work — create it. Do not treat a missing file as an error.
+Create `.handoff/` if it does not exist. If `.handoff/progress.md` does not exist, this is the first handoff for this work — create it. Do not treat a missing file as an error.
 
-**If `.claude/` cannot be created or written** — some sandboxed, headless, and CI environments deny writes to it — fall back to `progress.md` at the repository root and say clearly that you did. Losing the handoff entirely because of a permission gate is far worse than writing it one directory over. Note that the session hook only auto-loads the canonical `.claude/progress.md`, so a fallback file has to be read manually when resuming.
+**Deliberately not `.claude/`.** That directory is treated as a sensitive path and writes to it are denied outright in sandboxed, headless, and CI contexts, with no way to grant permission non-interactively. A handoff that silently produces no file is worse than no handoff at all. `.handoff/` is an ordinary directory, so there is one canonical location and no fallback to reason about. `.claude/` is also Claude Code's *configuration* directory — settings, skills, agents — and session state is not configuration.
 
-Check whether `.claude/` is ignored by git (`git check-ignore -q .claude`). If it is not ignored and the repository has no other committed `.claude/` content, mention once that the user may want to add `.claude/progress*.md` to `.gitignore`. Do not modify `.gitignore` without being asked.
+Check whether `.handoff/` is ignored by git (`git check-ignore -q .handoff`). If it is not, mention once that the user may want to add `.handoff/` to `.gitignore`. Do not modify `.gitignore` without being asked.
 
 ## Step 3: Read the existing file before overwriting it
 
@@ -120,7 +120,7 @@ Get the stamp values from `git rev-parse --abbrev-ref HEAD`, `git rev-parse --sh
 
 ## Step 6: Write the checks file
 
-Write `.claude/progress.checks.md`. This is what makes the handoff testable instead of hoped-for.
+Write `.handoff/progress.checks.md`. This is what makes the handoff testable instead of hoped-for.
 
 Generate 6 to 8 questions whose answers are knowable **only** from the session that is about to be cleared — not from reading the repository. Good questions probe the lossy parts:
 
@@ -155,11 +155,11 @@ Then tell the user the file is written, note how many checks were generated, and
 
 The work is finished or being set aside.
 
-1. Read `.claude/progress.md`. If it does not exist, say so and stop.
-2. Create `.claude/progress-archive/` if needed.
-3. Move the file to `.claude/progress-archive/<YYYY-MM-DD>-<slug>.md`, where the slug comes from the progress title, lowercased and hyphenated. If that path exists, append `-2`, `-3`, and so on.
+1. Read `.handoff/progress.md`. If it does not exist, say so and stop.
+2. Create `.handoff/progress-archive/` if needed.
+3. Move the file to `.handoff/progress-archive/<YYYY-MM-DD>-<slug>.md`, where the slug comes from the progress title, lowercased and hyphenated. If that path exists, append `-2`, `-3`, and so on.
 4. Append a closing stamp to the archived file: the final state, and one line on how the work actually ended.
-5. Delete `.claude/progress.checks.md` — it describes a session that no longer exists.
+5. Delete `.handoff/progress.checks.md` — it describes a session that no longer exists.
 6. Confirm what was archived and where.
 
 Archive rather than delete. It costs nothing, it silences the session hook, and it leaves a record of how the work went.
@@ -168,7 +168,7 @@ Archive rather than delete. It costs nothing, it silences the session hook, and 
 
 Run this in a **resumed** session, after clearing and reloading the progress file.
 
-1. Read `.claude/progress.checks.md`.
+1. Read `.handoff/progress.checks.md`.
 2. Answer every question using only what is currently in context — the progress file and anything read since. Do not consult the archive.
 3. Compare each answer against its **Expected** value.
 4. Report a table: question, hit or miss, and for each miss, what the progress file should have carried.

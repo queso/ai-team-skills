@@ -70,11 +70,11 @@ while [ "$rep" -le "$RUNS" ]; do
 
   for arm in baseline proposed; do
     src="$(ls -d "$sbx"/write-handoff-"$arm"-1* 2>/dev/null | head -1)"
-    # Headless sandboxes deny writes under .claude/, so agents fall back to the
-    # repo root. Accept either — where the file landed is a permission artifact,
-    # not a property of the handoff being measured.
+    # Canonical location is .handoff/. The repo root is still accepted as a
+    # safety net so a stray write is measured rather than scored as a total
+    # loss — where the file landed is not what this eval is about.
     found=""
-    for cand in "$src/.claude/progress.md" "$src/progress.md"; do
+    for cand in "$src/.handoff/progress.md" "$src/progress.md"; do
       [ -s "$cand" ] && { found="$cand"; break; }
     done
     if [ -z "$found" ]; then
@@ -83,7 +83,7 @@ while [ "$rep" -le "$RUNS" ]; do
     else
       echo "    $arm: $(wc -c < "$found" | tr -d ' ') bytes from ${found#"$src"/}"
       cp "$found" "$WORK/out/progress-$arm-rep$rep.md"
-      for c in "$src/progress.checks.md" "$src/.claude/progress.checks.md"; do
+      for c in "$src/progress.checks.md" "$src/.handoff/progress.checks.md"; do
         [ -s "$c" ] && cp "$c" "$WORK/out/checks-$arm-rep$rep.md"
       done
     fi
@@ -91,9 +91,8 @@ while [ "$rep" -le "$RUNS" ]; do
     dst="$WORK/seeds/resume-$arm-rep$rep"
     rm -rf "$dst"; cp -R "$FIX_DIR" "$dst"
     rm -f "$dst/SESSION.md"          # the transcript is gone; that is the point
-    mkdir -p "$dst/.claude"
-    cp "$WORK/out/progress-$arm-rep$rep.md" "$dst/.claude/progress.md"
-    cp "$WORK/out/progress-$arm-rep$rep.md" "$dst/progress.md"
+    mkdir -p "$dst/.handoff"
+    cp "$WORK/out/progress-$arm-rep$rep.md" "$dst/.handoff/progress.md"
     mkrepo "$dst"
   done
 

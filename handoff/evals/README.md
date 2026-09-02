@@ -147,10 +147,14 @@ persuasion, not for keeping the file at its current length.
 
 Worth recording, since it is the reason to have one:
 
-- **The skill had no fallback for an unwritable `.claude/`.** In a sandboxed run
-  the baseline degraded to the repo root; the skill refused and wrote *nothing*.
-  A handoff that produces no file in CI or any restricted environment is a total
-  loss. Fixed by adding an explicit fallback to `SKILL.md`.
+- **The progress file was in the wrong directory.** The skill originally wrote to
+  `.claude/progress.md`. In a sandboxed run the baseline degraded to the repo
+  root and the skill refused, writing *nothing at all* — a total loss in CI or
+  any restricted environment. The first fix was a fallback path; the real fix was
+  to stop using a guarded directory. A control run confirms it directly: in one
+  headless invocation with identical permissions, `.handoff/progress.md` was
+  written and `.claude/progress.md` was blocked as a sensitive file. The
+  canonical location is now `.handoff/`, and the fallback is gone.
 - **"Write pointers, not summaries" was moving cost, not saving it.** The
   original Step 4 told the agent to prefer `file.ts:42` over stating the finding.
   Handoffs written that way carried 11 line references across 3 replicates, and

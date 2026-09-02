@@ -71,11 +71,12 @@ The skill will detect your base branch, diff all unmerged changes, and return a 
 Captures the session's working state to a progress file so you can clear a bloated context and resume cheaply. In a long agentic session every turn re-reads the whole accumulated context — a file read is not charged once, it is charged again on every remaining turn. Clearing at 40% of the window and resuming from a 20k progress file, instead of continuing at 500k, saves roughly `remaining_turns × 480k`. The skill:
 
 - **Rewrites, never appends** — the file describes current state, not history, so it cannot grow into the context bloat it exists to prevent
-- **Prefers pointers over summaries** — paths, line numbers, SHAs, and exact commands survive a clear intact and cost a fraction of the prose that would restate them
+- **States conclusions, then points** — the resumed session should be able to act without opening a file; paths attach as corroboration rather than replacing the finding. A pointer that stands in for a conclusion just defers the cost to the reader
+- **Writes to `.handoff/`, not `.claude/`** — the latter is a guarded path where writes are denied outright in sandboxed, headless, and CI contexts, and it is Claude Code's configuration directory besides. Session state is not configuration
 - **Records what the repo cannot tell you** — why an approach was rejected, what failed and how, what the user asked for in their own framing
 - **Emits a self-test** — a `progress.checks.md` of questions answerable only from the pre-clear session, so information loss becomes a number instead of a feeling
 - **Guards against staleness and bloat** — the file stamps repo, branch, and timestamp; a progress file from another branch, from days ago, or grown past a size cap warns instead of loading
-- **Archives on completion** — `/handoff done` moves the file to `.claude/progress-archive/` rather than deleting it
+- **Archives on completion** — `/handoff done` moves the file to `.handoff/progress-archive/` rather than deleting it
 - **Reloads automatically** — an optional `SessionStart` hook re-injects the progress file, so resuming needs nothing remembered
 
 This is not a replacement for auto-compaction so much as a better-timed, curated alternative to it: compaction fires late and does not let you choose what survives.
@@ -96,7 +97,7 @@ In Claude Code, run:
 /handoff check
 ```
 
-`/handoff` writes `.claude/progress.md` and `.claude/progress.checks.md`. Clear the context, resume, then `/handoff check` scores the resumed session against the checks to show what the handoff dropped. `/handoff done` archives everything when the work is finished.
+`/handoff` writes `.handoff/progress.md` and `.handoff/progress.checks.md`. Clear the context, resume, then `/handoff check` scores the resumed session against the checks to show what the handoff dropped. `/handoff done` archives everything when the work is finished.
 
 #### Session hook
 

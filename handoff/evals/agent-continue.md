@@ -1,7 +1,7 @@
 You are resuming work on this repository after the previous session's context
 was cleared. Everything you know about that session comes from the saved
-progress file — `.claude/progress.md`, or `progress.md` at the repository root
-if that one is unreadable — plus the repository itself. There is no transcript.
+progress file at `.handoff/progress.md`, plus the repository itself. There is
+no transcript.
 
 Get oriented, then say what you would do next. Do not make any code changes.
 

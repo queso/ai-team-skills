@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart hook for the `handoff` skill.
 #
-# Reloads .claude/progress.md into a new session so that resuming after a
+# Reloads .handoff/progress.md into a new session so that resuming after a
 # context clear requires nothing to remember.
 #
 # Output contract: context reaches the model only via
@@ -24,7 +24,7 @@
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
-progress="$root/.claude/progress.md"
+progress="$root/.handoff/progress.md"
 [ -f "$progress" ] || exit 0
 
 max_age="${HANDOFF_MAX_AGE_DAYS:-3}"
@@ -77,7 +77,7 @@ if [ -z "$warn" ]; then
 fi
 
 if [ -n "$warn" ]; then
-  emit systemMessage "handoff: .claude/progress.md was NOT loaded — $warn. Archive it with /handoff done, or read it directly if it is still relevant."
+  emit systemMessage "handoff: .handoff/progress.md was NOT loaded — $warn. Archive it with /handoff done, or read it directly if it is still relevant."
   exit 0
 fi
 
