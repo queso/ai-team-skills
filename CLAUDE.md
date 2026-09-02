@@ -19,6 +19,10 @@ prd/                      PRDs for `/ateam plan`              ]  never inside
 tests/                    repo test suite                     ]  a skill directory
 ```
 
+Skills live at the **repo root**, one directory each. This is a skills
+collection, deliberately not a Claude Code plugin — see below before proposing
+otherwise.
+
 Two rules follow, both enforced by `tests/repo-hygiene.test.ts`:
 
 ### Nothing inside a skill directory that users should not receive
@@ -48,6 +52,34 @@ so the arm's prompt is unchanged, and with no `name:` there is nothing to
 register. Where an arm must be the real shipped skill, generate it at run time
 into a gitignored path rather than checking in a copy or a symlink — both are
 discoverable. `evals/handoff/run.sh` is the reference implementation.
+
+### Skills collection, not a plugin (decided 2026-09-02)
+
+A Claude Code plugin would register hooks automatically — `.claude-plugin/plugin.json`
+plus `hooks/hooks.json` using `${CLAUDE_PLUGIN_ROOT}`, no settings edit at install.
+That is a real advantage, and it is not the direction this repo takes. Josh's call:
+keep it a skills collection.
+
+The cost of converting, if it is ever reconsidered: `skills` is **not** a
+configurable component path in a plugin manifest. Only `commands`, `agents`,
+`hooks`, and `mcpServers` accept custom paths; skills load from `./skills/` and
+nowhere else. So every top-level skill directory would have to move under
+`skills/`, which `tests/repo-hygiene.test.ts` bans at repo root today.
+
+That move was tested before being declined, so the tradeoff is known rather than
+assumed: a scratch copy with skills relocated under `skills/` is still discovered
+correctly by the Skills CLI — same skill list, and `--skill handoff` produces a
+byte-equivalent install. Compatibility is not the objection; the churn is.
+
+**Do not** bridge the gap with symlinks from `skills/` to the top-level
+directories. That reproduces the discoverable-duplicate bug fixed in `77d2a2d`
+exactly, for the same reason the eval arm did.
+
+Because nothing auto-registers hooks here, a skill that ships one must also ship
+a way to install it. `handoff` is the reference: `scripts/install-hook.sh`,
+surfaced as `/handoff install`. `skills add` copies a skill directory and stops —
+it has no hook mechanism at all, so an unregistered hook is not an error anywhere,
+just a feature that silently never runs.
 
 ## Development
 
