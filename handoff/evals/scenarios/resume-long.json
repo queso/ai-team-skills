@@ -1,0 +1,23 @@
+{
+  "name": "handoff-resume-long",
+  "agent": "../agent-resume.md",
+  "baseline": ["../arms/neutral/SKILL.md"],
+  "proposed": ["../arms/neutral/SKILL.md"],
+  "delivery": "inline",
+  "mode": "text",
+  "tools": "Read,Glob,Grep",
+  "runs": 1,
+  "maxTurns": 20,
+  "maxBudgetUsd": 2,
+  "scenarios": [
+    {
+      "name": "resume-checks",
+      "kind": "compare",
+      "prompt": "Answer these about the work you are resuming.\n\nq1. What is the agreed fix, in a few words?\nq2. Was any approach implemented and then backed out? Name it and say why.\nq3. Did the user state any constraint on what may ship? Quote its substance.\nq4. Was any subsystem investigated and cleared as not being the cause? Name it.\nq5. The suite has failing tests. Which of them are part of this work, and which are not?\nq6. What decision is currently blocking the next step?",
+      "grader": {
+        "type": "json",
+        "assert": ["answers.q2 contains \"lock\"", "answers.q6 contains \"ref_external\""]
+      }
+    }
+  ]
+}

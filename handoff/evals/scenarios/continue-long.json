@@ -1,0 +1,23 @@
+{
+  "name": "handoff-continue-long",
+  "agent": "../agent-continue.md",
+  "baseline": ["../arms/neutral/SKILL.md"],
+  "proposed": ["../arms/neutral/SKILL.md"],
+  "delivery": "inline",
+  "mode": "text",
+  "tools": "Read,Glob,Grep",
+  "runs": 1,
+  "maxTurns": 20,
+  "maxBudgetUsd": 2,
+  "scenarios": [
+    {
+      "name": "continue-work",
+      "kind": "compare",
+      "prompt": "Pick up this work and tell me what you would do next.",
+      "grader": {
+        "type": "json",
+        "assert": ["blockers[*] contains \"ref_external\"", "ruled_out[*] contains \"lock\""]
+      }
+    }
+  ]
+}

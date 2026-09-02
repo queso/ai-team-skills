@@ -1,0 +1,23 @@
+{
+  "name": "handoff-write",
+  "agent": "../agent-write.md",
+  "baseline": ["../arms/baseline/SKILL.md"],
+  "proposed": ["../arms/proposed/SKILL.md"],
+  "delivery": "inline",
+  "mode": "artifact",
+  "tools": "Read,Write,Glob,Grep,Bash",
+  "runs": 1,
+  "maxTurns": 20,
+  "maxBudgetUsd": 2,
+  "scenarios": [
+    {
+      "name": "write-handoff",
+      "kind": "compare",
+      "prompt": "Read SESSION.md, then perform the handoff exactly as your instructions describe. When you are done, stop.",
+      "grader": {
+        "type": "command",
+        "command": "test -s .claude/progress.md || test -s progress.md"
+      }
+    }
+  ]
+}

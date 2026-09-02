@@ -1,0 +1,20 @@
+{
+  "_note": "Each question lists ALTERNATIVE acceptable substrings, matched case-insensitively; any one counts. Single-string matching produced false negatives — an answer of 'ON CONFLICT DO NOTHING' is correct but contains no 'upsert'.",
+  "recall": {
+    "q1": ["upsert", "on conflict"],
+    "q2": ["deadlock", "advisory lock"],
+    "q3": ["migration", "schema change", "friday"],
+    "q4": ["retry", "backoff"],
+    "q5": ["variant-resolution", "variant resolution"],
+    "q6": ["ref_external", "external ref"]
+  },
+  "unrecoverable": ["q2", "q3", "q5", "q6"],
+  "consume": {
+    "blocker surfaced": ["ref_external", "external ref", "unique"],
+    "knew lock was backed out": ["lock", "advisory"],
+    "knew retry was cleared": ["retry", "backoff"],
+    "targets right file": ["variant-resolution.ts", "variant_resolution.ts"],
+    "RE-PROPOSED a vetoed fix": ["advisory lock", "pg_advisory", "advisory_lock"],
+    "carried a distractor": ["logger.ts"]
+  }
+}

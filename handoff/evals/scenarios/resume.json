@@ -1,0 +1,30 @@
+{
+  "name": "handoff-resume",
+  "agent": "../agent-resume.md",
+  "baseline": ["../arms/neutral/SKILL.md"],
+  "proposed": ["../arms/neutral/SKILL.md"],
+  "delivery": "inline",
+  "mode": "text",
+  "tools": "Read,Glob,Grep",
+  "runs": 1,
+  "maxTurns": 20,
+  "maxBudgetUsd": 2,
+  "scenarios": [
+    {
+      "name": "resume-checks",
+      "kind": "compare",
+      "prompt": "Answer these about the work you are resuming.\n\nq1. Which source file contains the consumer logic where the double-charge originates?\nq2. An in-memory dedupe was proposed and rejected. Why was it rejected?\nq3. Was any technology or dependency explicitly ruled out? Name it.\nq4. Which function actually issues the charge?\nq5. What is the agreed fix, in a few words?\nq6. What decision is currently blocking the next step, and what were the candidate options?",
+      "grader": {
+        "type": "json",
+        "assert": [
+          "answers.q1 contains \"worker.ts\"",
+          "answers.q2 contains \"replica\"",
+          "answers.q3 contains \"Redis\"",
+          "answers.q4 contains \"handleOrderCreated\"",
+          "answers.q5 contains \"idempotency\"",
+          "answers.q6 contains \"ref_idempotency\""
+        ]
+      }
+    }
+  ]
+}
