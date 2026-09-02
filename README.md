@@ -66,6 +66,63 @@ In Claude Code, run:
 
 The skill will detect your base branch, diff all unmerged changes, and return a structured review.
 
+### handoff
+
+Captures the session's working state to a progress file so you can clear a bloated context and resume cheaply. In a long agentic session every turn re-reads the whole accumulated context — a file read is not charged once, it is charged again on every remaining turn. Clearing at 40% of the window and resuming from a 20k progress file, instead of continuing at 500k, saves roughly `remaining_turns × 480k`. The skill:
+
+- **Rewrites, never appends** — the file describes current state, not history, so it cannot grow into the context bloat it exists to prevent
+- **Prefers pointers over summaries** — paths, line numbers, SHAs, and exact commands survive a clear intact and cost a fraction of the prose that would restate them
+- **Records what the repo cannot tell you** — why an approach was rejected, what failed and how, what the user asked for in their own framing
+- **Emits a self-test** — a `progress.checks.md` of questions answerable only from the pre-clear session, so information loss becomes a number instead of a feeling
+- **Guards against staleness and bloat** — the file stamps repo, branch, and timestamp; a progress file from another branch, from days ago, or grown past a size cap warns instead of loading
+- **Archives on completion** — `/handoff done` moves the file to `.claude/progress-archive/` rather than deleting it
+- **Reloads automatically** — an optional `SessionStart` hook re-injects the progress file, so resuming needs nothing remembered
+
+This is not a replacement for auto-compaction so much as a better-timed, curated alternative to it: compaction fires late and does not let you choose what survives.
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@handoff -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/handoff
+/handoff done
+/handoff check
+```
+
+`/handoff` writes `.claude/progress.md` and `.claude/progress.checks.md`. Clear the context, resume, then `/handoff check` scores the resumed session against the checks to show what the handoff dropped. `/handoff done` archives everything when the work is finished.
+
+#### Session hook
+
+To reload the progress file automatically on every new session, add to `settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/skills/handoff/scripts/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook injects via `hookSpecificOutput.additionalContext` (plain stdout would only reach the transcript, not the model) and sends warnings to `systemMessage`. It stays silent when no progress file exists, and warns rather than injecting when the file is stale or oversized.
+
+Tune with `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000), and `HANDOFF_IGNORE_BRANCH=1`. Requires `jq` or `python3`.
+
 ### write-prd
 
 Creates a new Product Requirements Document with auto-numbered filenames. The skill:
