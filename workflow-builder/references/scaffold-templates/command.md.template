@@ -1,0 +1,47 @@
+---
+description: {{COMMAND_DESCRIPTION}}
+argument-hint: {{ARGUMENT_HINT}}
+---
+
+# /{{PLUGIN_NAME}}:{{COMMAND_NAME}}
+
+## Purpose
+
+{{COMMAND_PURPOSE}}
+
+<!-- TODO: 1-2 sentences. What does running this command accomplish from the
+     user's perspective? Examples:
+       - /video-pipeline:run     -> "Process every queued video through ingest -> export."
+       - /social-pipeline:draft  -> "Take a brief and produce reviewed, scheduled posts."
+       - /<plugin>:resume        -> "Pick up an interrupted run from the last checkpoint."
+     -->
+
+## Process
+
+<!-- TODO: numbered steps the orchestrator follows when this command fires.
+     Keep it tight. Reference reference docs instead of inlining details. -->
+
+1. Run pre-flight checks (config validation, required tools available).
+2. {{DOMAIN_STEP_1}}
+3. Dispatch the first-stage specialist for each ready work item. See `references/orchestration-and-fan-out.md` for dispatch patterns.
+4. Wait for `FYI` (handoff succeeded) or `ALERT` (intervention needed) messages.
+5. On `ALERT`, follow the recovery procedure in the relevant agent's prompt.
+6. When all items reach the terminal stage, run post-checks and report.
+
+<!-- TODO: replace DOMAIN_STEP_1 etc. with the steps specific to your workflow.
+     For video: load delivery-spec config. For social: read upcoming posting
+     calendar. -->
+
+## Arguments
+
+{{ARGUMENT_DESCRIPTION}}
+
+<!-- TODO: describe each argument the command accepts, or remove this section
+     if the command takes none. -->
+
+## Output
+
+{{COMMAND_OUTPUT_DESCRIPTION}}
+
+<!-- TODO: describe what the user sees when this command finishes. A status
+     summary? A path to a report? A diff? Be specific. -->

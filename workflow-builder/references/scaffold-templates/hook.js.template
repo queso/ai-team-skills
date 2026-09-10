@@ -1,0 +1,92 @@
+#!/usr/bin/env node
+/**
+ * Boundary hook for {{ROLE_NAME}}
+ *
+ * Blocks Write/Edit/MultiEdit on paths outside this role's write scope.
+ * Allowed write globs: {{WRITE_GLOBS}}
+ *
+ * This hook is the hard-enforcement counterpart to the "## Write boundary"
+ * statement in agents/{{ROLE_NAME}}.md. Keep the two in sync — when you
+ * change one, change the other.
+ *
+ * See references/role-boundaries.md for the principle and references/examples
+ * for full worked examples (video pipeline, social pipeline, A(i)-Team).
+ *
+ * The runtime sends hook context via stdin JSON: { tool_name, tool_input,
+ * agent (sometimes), ... }. The hook should:
+ *   - exit 0  -> allow the tool call
+ *   - exit 2  -> block, with stderr message shown to the agent
+ *   - exit 1  -> hook error (treated as allow; do not use for policy)
+ */
+
+import { readFileSync } from 'fs';
+
+let hookInput = {};
+try {
+  const raw = readFileSync(0, 'utf8');
+  hookInput = JSON.parse(raw);
+} catch {
+  // Can't read stdin — fail open so we never block on infrastructure errors.
+  process.exit(0);
+}
+
+try {
+  // ---- Step 1: confirm this hook applies to the current agent ----
+  // TODO: if your hook framework attaches the agent name to hookInput, gate
+  // here. Otherwise this hook is wired in only for {{ROLE_NAME}}'s frontmatter
+  // and applies unconditionally.
+  //
+  // Example pattern (adapt to your resolver):
+  //   const agent = hookInput.agent ?? '';
+  //   if (agent !== '{{ROLE_NAME}}') process.exit(0);
+
+  const toolName = hookInput.tool_name || '';
+  const toolInput = hookInput.tool_input || {};
+  const filePath = toolInput.file_path || toolInput.notebook_path || '';
+
+  // ---- Step 2: only gate write-capable tools ----
+  const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+  if (!WRITE_TOOLS.has(toolName)) {
+    process.exit(0);
+  }
+
+  if (!filePath) {
+    process.exit(0);
+  }
+
+  // ---- Step 3: allow scratchpads (recommended) ----
+  // /tmp/ is a common allow-list — agents need throwaway space.
+  if (filePath.startsWith('/tmp/')) {
+    process.exit(0);
+  }
+
+  // ---- Step 4: allow paths inside the role's write scope ----
+  // TODO: replace these allow-rules with the globs from your design doc's
+  // "Write boundary" entry for {{ROLE_NAME}}. Match by extension, by directory
+  // segment, or by full glob — whichever is the cleanest invariant.
+  //
+  // Examples from the worked examples:
+  //   - video editor:        filePath.match(/\.(fcpxml|prproj|kdenlive)$/)
+  //   - copywriter:          filePath.match(/^drafts\//) || filePath.match(/^assets\//)
+  //   - compliance-reviewer: filePath.match(/^reviews\/[^/]+-compliance\.md$/)
+  //   - Murdock (A(i)-Team): filePath.match(/\.(test|spec)\.(ts|js|tsx|jsx)$/)
+
+  // {{WRITE_GLOB_REGEX_1}}
+  if (false /* TODO: replace with allow-rule 1 */) {
+    process.exit(0);
+  }
+
+  // {{WRITE_GLOB_REGEX_2}}
+  if (false /* TODO: replace with allow-rule 2 */) {
+    process.exit(0);
+  }
+
+  // ---- Step 5: block everything else ----
+  process.stderr.write(`BLOCKED: {{ROLE_NAME}} cannot write outside its scope: ${filePath}\n`);
+  process.stderr.write('Allowed paths: {{WRITE_GLOBS}}\n');
+  process.stderr.write('See agents/{{ROLE_NAME}}.md "## Write boundary".\n');
+  process.exit(2);
+} catch {
+  // Fail open on any unexpected error — never block on hook bugs.
+  process.exit(0);
+}

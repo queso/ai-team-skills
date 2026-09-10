@@ -1,0 +1,37 @@
+import type { Plugin } from "@opencode-ai/plugin";
+
+/**
+ * Workflow boundary enforcement.
+ *
+ * OpenCode loads local plugins from `.opencode/plugins/`.
+ * This plugin is the hard-enforcement counterpart to each agent's
+ * "Write boundary" section and `permission.edit` config.
+ *
+ * TODO: replace the placeholder role/path checks with the write globs from
+ * the design doc. See references/role-boundaries.md.
+ */
+export const WorkflowBoundaries: Plugin = async () => {
+  return {
+    "tool.execute.before": async (input, output) => {
+      const tool = String(input.tool ?? "");
+      if (!["write", "edit", "apply_patch"].includes(tool)) return;
+
+      const args = output.args ?? {};
+      const filePath =
+        String(args.filePath ?? args.file_path ?? args.path ?? args.notebook_path ?? "");
+
+      if (!filePath) return;
+      if (filePath.startsWith("/tmp/")) return;
+
+      // TODO: Determine the active agent/role from hook context when available.
+      // Keep this deny-by-default until every role's allowed write paths are encoded.
+      const allowed = false;
+
+      if (!allowed) {
+        throw new Error(
+          `Workflow boundary blocked ${tool} on ${filePath}. Update .opencode/plugins/workflow-boundaries.ts with the role allow-list.`
+        );
+      }
+    },
+  };
+};

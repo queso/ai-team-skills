@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- New `workflow-builder` skill: design, scaffold, and review multi-agent workflows for any domain, targeting Claude Code or OpenCode
 - New zip download pipeline for v0-setup fetch script, bypassing the broken inline JSON API (#WI-144)
 - Modular architecture: `version-list.mjs`, `zip-download.mjs`, `file-filter.mjs`, `placeholder-detection.mjs` (#WI-142, #WI-143, #WI-144, #WI-145)
 - `--version <id>` flag to fetch a specific v0 chat version (#WI-146)

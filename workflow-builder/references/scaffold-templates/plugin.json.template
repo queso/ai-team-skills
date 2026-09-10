@@ -1,0 +1,9 @@
+{
+  "name": "{{WORKFLOW_NAME}}",
+  "description": "{{WORKFLOW_DESCRIPTION}}",
+  "version": "0.1.0",
+  "minCliVersion": "1.6.0",
+  "author": {
+    "name": "{{AUTHOR_NAME}}"
+  }
+}

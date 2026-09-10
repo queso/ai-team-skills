@@ -1,0 +1,69 @@
+---
+name: {{SKILL_NAME}}
+description: {{SKILL_DESCRIPTION}}
+---
+
+# {{SKILL_NAME}}
+
+## What this is
+
+{{SKILL_PURPOSE}}
+
+<!-- TODO: 1-2 sentences. What standard does this skill codify? Who uses it?
+     Examples:
+       - brand-voice-guide:     "The brand's voice rules. Used by the copywriter
+                                 to self-check drafts and by the voice-reviewer
+                                 to issue verdicts."
+       - delivery-spec-checks:  "The delivery contract for every video output.
+                                 Used by the qc-agent and export-agent."
+       - test-writing:          "Test quality standards: banned anti-patterns,
+                                 mandatory checks. Used by Murdock and Lynch."
+
+     The principle: reviewer judgment lives here, not in the reviewer's prompt.
+     See references/guardrail-skills.md. -->
+
+## When to apply
+
+<!-- TODO: bullet list. Be concrete about the trigger conditions. -->
+
+- {{TRIGGER_1}}
+- {{TRIGGER_2}}
+- {{TRIGGER_3}}
+
+## Self-Check
+
+<!-- TODO: numbered checklist. Each item should be answerable yes/no by reading
+     the artifact under review. The reviewer's job is to run this list and
+     issue APPROVED only if every answer is yes. Update this list when the
+     standard evolves — every reviewer picks it up on the next run. -->
+
+1. {{CHECK_1}}
+2. {{CHECK_2}}
+3. {{CHECK_3}}
+4. {{CHECK_4}}
+5. {{CHECK_5}}
+
+## Examples
+
+### Bad
+
+<!-- TODO: a real example of work that fails the Self-Check. Show the artifact
+     and call out which check it fails. The bad example is half the value of a
+     guardrail skill — it makes the abstract standard concrete. -->
+
+```
+{{BAD_EXAMPLE}}
+```
+
+Why this fails: {{BAD_FAILURE_REASON}}
+
+### Good
+
+<!-- TODO: a real example of work that passes the Self-Check, ideally a
+     minimal correction of the Bad example so the diff is visible. -->
+
+```
+{{GOOD_EXAMPLE}}
+```
+
+Why this passes: {{GOOD_REASON}}

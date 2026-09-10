@@ -1,0 +1,29 @@
+---
+description: {{COMMAND_DESCRIPTION}}
+---
+
+# {{COMMAND_NAME}}
+
+## Purpose
+
+{{COMMAND_PURPOSE}}
+
+<!-- OpenCode arguments are available as `$ARGUMENTS` and positional
+     placeholders such as `$1`, `$2`, and `$3`. -->
+
+## Process
+
+1. Run pre-flight checks for required files and config.
+2. {{DOMAIN_STEP_1}}
+3. Dispatch or ask for the first-stage specialist for each ready work item.
+4. Track output files as each stage completes.
+5. On blocker, stop and report the exact stage, role, file path, and needed input.
+6. When all items reach the terminal stage, run post-checks and report.
+
+## Arguments
+
+{{ARGUMENT_DESCRIPTION}}
+
+## Output
+
+{{COMMAND_OUTPUT_DESCRIPTION}}

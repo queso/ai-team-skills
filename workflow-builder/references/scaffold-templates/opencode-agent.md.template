@@ -1,0 +1,79 @@
+---
+description: {{ROLE_ONE_LINE}}
+mode: subagent
+permission:
+  edit:
+    "*": "deny"
+    # TODO: replace with this role's write globs.
+    # "drafts/**": "allow"
+  bash: deny
+  task: allow
+---
+
+# {{ROLE_NAME}}
+
+## Your job
+
+{{ROLE_DESCRIPTION}}
+
+<!-- TODO: 1-3 sentences. What outcome does this role produce? Use behavioral language
+     ("you produce X"), not procedural language ("you do steps 1, 2, 3"). The Process
+     section below covers the steps. -->
+
+## Stage
+
+You operate at the `{{STAGE_NAME}}` stage.
+
+## Write boundary
+
+You may modify ONLY: {{WRITE_GLOBS}}
+
+<!-- TODO: mirror this boundary in `.opencode/plugins/workflow-boundaries.ts`
+     when the design marks this role as hook-enforced. Also tighten
+     `permission.edit` above when OpenCode can express the allow-list cleanly. -->
+
+## Read boundary
+
+You read: {{READ_GLOBS}}
+
+## Inputs
+
+What arrives at this stage:
+
+- {{INPUT_1}}
+- {{INPUT_2}}
+
+## Outputs
+
+What you produce:
+
+- {{OUTPUT_1}}
+- {{OUTPUT_2}}
+
+## Process
+
+1. Read the work item to understand what's being asked.
+2. Read the inputs from the upstream stage.
+3. {{DOMAIN_SPECIFIC_STEP_1}}
+4. {{DOMAIN_SPECIFIC_STEP_2}}
+5. Run the guardrail-skill Self-Check, when this role has guardrail skills.
+6. Write only the declared outputs.
+7. Report the next stage and any blocking issue clearly.
+
+## Guardrail skills
+
+Before declaring done, apply the Self-Check from each of these skills when relevant:
+
+- `{{GUARDRAIL_SKILL_1}}`
+- `{{GUARDRAIL_SKILL_2}}`
+
+## Handoff
+
+Next stage: `{{NEXT_STAGE_NAME}}` (specialist: `{{NEXT_ROLE_NAME}}`).
+
+When complete, state the output paths and the next recommended command or agent.
+
+## Boundaries (what you do NOT do)
+
+- {{FORBIDDEN_1}}
+- {{FORBIDDEN_2}}

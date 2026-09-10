@@ -180,6 +180,33 @@ The fetch pipeline is composed of four modules in `v0-setup/scripts/`:
 
 These are orchestrated by `runPipeline()` in `fetch-v0.mjs`, which accepts injected dependencies for testability.
 
+### workflow-builder
+
+Design, scaffold, and review multi-agent workflows for any domain. The patterns come from the A(i)-Team plugin's architecture (staged flow, fan-out, distinct-angle review passes, hook-enforced role boundaries) but the skill is domain-agnostic: video pipelines, social content, engineering, ops, triage. The skill:
+
+- **Walks through design decisions** — stages, specialists per stage, fan-out, orchestration model, verification passes, enforcement, and guardrail skills, producing an 8-section design doc
+- **Scaffolds a skeleton** from the design doc targeting Claude Code plugins, OpenCode project layouts, or both, with TODO markers pointing back to the relevant reference
+- **Reviews a built workflow** for coverage gaps, known anti-patterns, and pattern fidelity, with an optional drift check against its design doc
+- **Ships worked examples** for video, social content, and the A(i)-Team engineering pipeline
+
+#### Install
+
+```bash
+npx skills add queso/ai-team-skills@workflow-builder -g -y
+```
+
+#### Usage
+
+In Claude Code, run:
+
+```
+/workflow-builder:design [workflow-name]
+/workflow-builder:scaffold <design-doc-path> [output-dir]
+/workflow-builder:review <plugin-root> [--against <design-doc>]
+```
+
+Design produces a doc you edit, scaffold turns it into a plugin skeleton, and review audits the result.
+
 ## Contributing
 
 PRs welcome. Each skill lives in its own directory:

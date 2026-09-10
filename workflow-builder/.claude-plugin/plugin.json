@@ -1,0 +1,9 @@
+{
+  "name": "workflow-builder",
+  "description": "Design, scaffold, and review multi-agent workflows for any domain. Walks through stage design, fan-out, multi-pass verification, and role boundaries; emits Claude Code or OpenCode workflow skeletons you can fill in.",
+  "version": "0.1.0",
+  "minCliVersion": "1.6.0",
+  "author": {
+    "name": "Josh Owens"
+  }
+}
