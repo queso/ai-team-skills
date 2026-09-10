@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `address-pr-feedback` now runs unattended: it categorizes and replies without confirmation prompts, then rechecks the PR every 5 minutes and repeats on new feedback until 15 minutes pass with nothing new. Adds `--once` to run a single pass and `--create-issues` to open issues for deferred items. Filters out the operator's own replies, uses `since` on recheck fetches, and stops early on merge/close, push conflicts, unrepairable tests, repeated reviewer pushback, or ten passes
+
 ### Added
 - New `handoff` skill: captures session working state to `.handoff/progress.md` so a bloated context can be cleared and resumed cheaply. Deliberately not `.claude/` — that path is guarded and writes to it are denied in sandboxed, headless, and CI contexts (verified: in one headless run with identical permissions, `.handoff/progress.md` was written and `.claude/progress.md` was blocked as a sensitive file), and it is Claude Code's configuration directory rather than a place for session state
 - `handoff` writes a companion `.handoff/progress.checks.md` so information loss across a clear is measurable rather than assumed

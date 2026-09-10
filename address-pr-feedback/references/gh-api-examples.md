@@ -118,6 +118,56 @@ Response shape:
 
 Focus on reviews with `state: "CHANGES_REQUESTED"` — these contain actionable feedback in the `body` field. `APPROVED` reviews with empty bodies can be skipped.
 
+## Detecting the Operator Login
+
+The account `gh` is authenticated as, which is the account replies are posted from:
+
+```bash
+gh api user --jq .login
+# Output: "operator-login"
+```
+
+Exclude this login alongside the PR author when filtering feedback, so the skill never treats its own replies as new review comments.
+
+## Fetching Only Comments Since a Timestamp
+
+Both comment endpoints accept a `since` parameter (ISO 8601 UTC). Use it on recheck passes to keep the fetch small:
+
+```bash
+gh api "repos/{owner}/{repo}/pulls/{number}/comments?since=2025-01-15T10:30:00Z" --paginate
+gh api "repos/{owner}/{repo}/issues/{number}/comments?since=2025-01-15T10:30:00Z" --paginate
+```
+
+`since` filters on `updated_at`, not `created_at`, so an edited old comment can reappear. Always drop IDs already in the ledger after fetching.
+
+Reviews have no `since` parameter. Fetch the full list with `gh pr view {number} --json reviews` and compare `submittedAt` against the last fetch time.
+
+## Listing Review Threads With Resolution State
+
+The REST comments endpoint does not expose whether a thread is resolved. Use GraphQL to list threads with their state and the IDs of their comments:
+
+```bash
+gh api graphql -f query='
+  query {
+    repository(owner: "{owner}", name: "{repo}") {
+      pullRequest(number: {number}) {
+        reviewThreads(first: 100) {
+          nodes {
+            id
+            isResolved
+            comments(first: 1) {
+              nodes { databaseId }
+            }
+          }
+        }
+      }
+    }
+  }
+'
+```
+
+Match `comments.nodes[0].databaseId` to the `id` of a root inline comment from the REST endpoint. Skip threads where `isResolved` is true. The `id` on each thread node is the value `resolveReviewThread` needs, which saves the per-comment lookup below when resolving many threads at once.
+
 ## Detecting the PR Owner and Repo
 
 ```bash

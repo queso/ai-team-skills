@@ -6,18 +6,17 @@ A collection of open-source [Claude Code](https://claude.ai/code) skills for sof
 
 ### address-pr-feedback
 
-Fetches all review comments on a pull request and systematically addresses them. The skill:
+Runs an unattended review loop on a pull request. Once started it needs no confirmation: it decides how to categorize each comment, fixes what should be fixed, replies to every thread, and keeps watching the PR until reviewers go quiet. The skill:
 
 - **Finds the PR automatically** from the current branch, or accepts a PR number/URL as an argument
-- **Fetches all feedback** — inline code review comments, conversation-level comments, and review summaries
-- **Filters noise** — skips self-comments, CI bots, resolved threads, and non-substantive reactions while keeping code review bot feedback (CodeRabbit, PR Agent, etc.)
-- **Categorizes every comment** into **Will Fix** (address now via TDD), **Won't Fix** (explain why), or **New Issue** (valid but out of scope)
-- **Confirms with you** before proceeding — you can adjust any categorization
-- **Fixes using TDD** — for each "Will Fix" item, writes a failing test first, implements the fix, then verifies the full test suite passes
-- **Commits and pushes** with a descriptive message referencing the PR number
-- **Summarizes everything** in a table showing what was done, what was declined, and what was deferred
-- **Optionally posts a PR comment** summarizing what feedback was addressed
-- **Optionally creates GitHub issues** for "New Issue" items
+- **Fetches all feedback**: inline code review comments, conversation-level comments, and review summaries
+- **Filters noise**: skips self-comments, its own replies, CI bots, resolved threads, and non-substantive reactions while keeping code review bot feedback (CodeRabbit, PR Agent, etc.)
+- **Categorizes every comment** into **Will Fix** (address now via TDD), **Won't Fix** (explain why), or **New Issue** (valid but out of scope), using tie-break rules that favor fixing small in-scope requests
+- **Fixes using TDD** with parallel SDET subagents: for each Will Fix item, writes a failing test first, implements the fix, then verifies the full test suite passes
+- **Commits and pushes** with a descriptive message referencing the PR number and pass count
+- **Replies to every thread and resolves it**, citing the commit for fixes and a concrete reason for anything declined or deferred
+- **Waits 5 minutes, rechecks, and repeats** on only the feedback that arrived since the last pass
+- **Stops after 15 quiet minutes**, or earlier if the PR closes, a push conflicts, tests cannot be repaired, a reviewer pushes back twice on a declined item, or ten passes complete
 
 #### Install
 
@@ -33,9 +32,11 @@ In Claude Code, run:
 /address-pr-feedback
 /address-pr-feedback 42
 /address-pr-feedback https://github.com/owner/repo/pull/42
+/address-pr-feedback 42 --once
+/address-pr-feedback 42 --create-issues
 ```
 
-The skill will fetch all review comments, ask you to confirm its categorization, fix what needs fixing with TDD, and push the results.
+`--once` runs a single pass without the recheck loop. `--create-issues` opens a GitHub issue for each New Issue item so replies can link it; by default the skill only lists suggested issue titles in its final summary.
 
 ### code-review
 
