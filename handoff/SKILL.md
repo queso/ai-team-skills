@@ -30,23 +30,24 @@ If the argument is `done`, go to **Step 7**. If it is `check`, go to **Step 8**.
 
 ## Step 2: Locate the progress file
 
-Resolve the **lane** first. A lane is whatever survives `/clear` (a pane or a workspace), not the repository, so keying the filename by lane is what lets several sessions share a repo without overwriting each other's state. Take the first of these that is set:
-
-1. `$HANDOFF_LANE`
-2. `$HERDR_WORKSPACE_ID` (herdr injects this into every pane)
-3. `$TMUX_PANE`
-4. the literal `progress`, if none of the above are set — this reproduces today's single-file behavior for a session with no resolvable lane
-
-Sanitize it before using it in a path, so an unexpected value in one of those env vars cannot walk outside `.handoff/`:
+Resolve the **lane** first. A lane is whatever survives `/clear` (a pane, not the workspace it sits in), not the repository, so keying the filename by lane is what lets several sessions share a repo without overwriting each other's state. Get it by running the shared resolver script rather than re-deriving it:
 
 ```bash
-lane="${HANDOFF_LANE:-${HERDR_WORKSPACE_ID:-${TMUX_PANE:-progress}}}"
-lane="$(printf '%s' "$lane" | tr -c 'A-Za-z0-9._-' '_')"
+lane="$(bash "$CLAUDE_SKILL_DIR/scripts/lane.sh")"
 ```
+
+If that variable is not set, use the directory this `SKILL.md` was loaded from. `lane.sh` takes the first of these that is set, sanitized so an unexpected value cannot walk the path outside `.handoff/`:
+
+1. `$HANDOFF_LANE`
+2. `$HERDR_PANE_ID` (herdr's pane-scoped id — not `$HERDR_WORKSPACE_ID`, which is shared by every tab and pane in a workspace and would collapse them onto one lane)
+3. `$TMUX_PANE`
+4. the literal `progress`, if none of the above are set — this reproduces today's single-file behavior for a session with no resolvable lane
 
 The progress file lives at `.handoff/<lane>.md`, relative to the repository root (`git rev-parse --show-toplevel`). If not in a git repository, use the current working directory and say so.
 
 Create `.handoff/` if it does not exist. If `.handoff/<lane>.md` does not exist, this is the first handoff for this lane — create it. Do not treat a missing file as an error.
+
+**Stale lanes are not cleaned up.** Nothing prunes `.handoff/<lane>.md` when its pane or workspace closes without `/handoff done`. A tmux or herdr pane id can be reused after a restart, so a session that inherits a reused or hand-set lane id also inherits whatever stale state a previous, unrelated session left in that file. There is no automatic detection for this today; treat an unexpectedly-populated lane file as a sign the id may be recycled.
 
 **Deliberately not `.claude/`.** That directory is treated as a sensitive path and writes to it are denied outright in sandboxed, headless, and CI contexts, with no way to grant permission non-interactively. A handoff that silently produces no file is worse than no handoff at all. `.handoff/` is an ordinary directory, so there is one canonical location and no fallback to reason about. `.claude/` is also Claude Code's *configuration* directory — settings, skills, agents — and session state is not configuration.
 
@@ -243,6 +244,8 @@ The equivalent by hand, in `settings.json`:
 }
 ```
 
-Tunable with `HANDOFF_LANE` to name the seat explicitly (falls back to `$HERDR_WORKSPACE_ID`, then `$TMUX_PANE`, then `progress`), `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000, roughly 6k tokens), and `HANDOFF_IGNORE_BRANCH=1` to skip the branch check.
+Tunable with `HANDOFF_LANE` to name the seat explicitly (falls back to `$HERDR_PANE_ID`, then `$TMUX_PANE`, then `progress`), `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000, roughly 6k tokens), and `HANDOFF_IGNORE_BRANCH=1` to skip the branch check.
+
+If a lane var resolves to a file that has never been written but a pre-seat-keying `.handoff/progress.md` exists, the hook reports that once via `systemMessage` instead of silently doing nothing — that file is orphaned and needs a manual rename to `.handoff/<lane>.md`, or a `/handoff done` to archive it.
 
 The script needs `jq` or `python3` to emit its JSON payload. With neither available it exits silently rather than printing text that would be mistaken for context. `install-hook.sh` requires `python3` specifically, and prints the JSON block above if it is missing.
