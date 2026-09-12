@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # SessionStart hook for the `handoff` skill.
 #
-# Reloads .handoff/progress.md into a new session so that resuming after a
-# context clear requires nothing to remember.
+# Reloads .handoff/<lane>.md into a new session so that resuming after a
+# context clear requires nothing to remember. State is keyed by lane, not by
+# repo: a lane is whatever survives /clear (a single pane), so multiple
+# sessions sharing a repo each get their own file instead of clobbering one
+# another.
+#
+# Lane resolution, first set wins:
+#   $HANDOFF_LANE, $HERDR_PANE_ID, $TMUX_PANE, else "progress"
+# (resolved by the shared scripts/lane.sh — see there for why it's the pane
+# id and not $HERDR_WORKSPACE_ID). A session with no resolvable lane falls
+# back to the single shared .handoff/progress.md this replaces, and loads
+# only its own lane's file — never another seat's.
 #
 # Output contract: context reaches the model only via
 # hookSpecificOutput.additionalContext — plain stdout lands in the transcript,
@@ -18,18 +28,19 @@
 #                                  the context bloat this skill exists to prevent)
 #
 # Env:
+#   HANDOFF_LANE           lane name, overriding $HERDR_PANE_ID/$TMUX_PANE
 #   HANDOFF_MAX_AGE_DAYS   staleness cutoff in days (default 3)
 #   HANDOFF_MAX_BYTES      size cutoff (default 24000, roughly 6k tokens)
 #   HANDOFF_IGNORE_BRANCH  set to 1 to skip the branch check
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
-progress="$root/.handoff/progress.md"
-[ -f "$progress" ] || exit 0
 
-max_age="${HANDOFF_MAX_AGE_DAYS:-3}"
-max_bytes="${HANDOFF_MAX_BYTES:-24000}"
-warn=""
+here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+lane="$(bash "$here/lane.sh")"
+
+progress="$root/.handoff/$lane.md"
+legacy="$root/.handoff/progress.md"
 
 # JSON emission. jq preferred, python3 as fallback; without either we cannot
 # emit a valid payload, so stay silent rather than print text that would be
@@ -49,6 +60,22 @@ print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","addition
     exit 0
   fi
 }
+
+if [ ! -f "$progress" ]; then
+  # A lane var resolved but nothing has ever been written for it. If a
+  # pre-seat-keying .handoff/progress.md exists, it is now orphaned: the
+  # hook will keep silently not-loading it forever unless we say so once.
+  # (When lane is itself "progress", $progress and $legacy are the same
+  # path, so this branch is only reachable when they differ.)
+  if [ "$lane" != "progress" ] && [ -f "$legacy" ]; then
+    emit systemMessage "handoff: .handoff/progress.md exists but this session resolved to lane '$lane', so it was NOT loaded — .handoff/$lane.md does not exist. Rename .handoff/progress.md to .handoff/$lane.md to resume it here, or run /handoff done on it to archive it."
+  fi
+  exit 0
+fi
+
+max_age="${HANDOFF_MAX_AGE_DAYS:-3}"
+max_bytes="${HANDOFF_MAX_BYTES:-24000}"
+warn=""
 
 file_branch="$(sed -n 's/^repo:.*branch: *\([^ |]*\).*/\1/p' "$progress" | head -1)"
 updated="$(sed -n 's/^updated: *\([^ ]*\).*/\1/p' "$progress" | head -1)"
@@ -77,7 +104,7 @@ if [ -z "$warn" ]; then
 fi
 
 if [ -n "$warn" ]; then
-  emit systemMessage "handoff: .handoff/progress.md was NOT loaded — $warn. Archive it with /handoff done, or read it directly if it is still relevant."
+  emit systemMessage "handoff: .handoff/$lane.md was NOT loaded — $warn. Archive it with /handoff done, or read it directly if it is still relevant."
   exit 0
 fi
 

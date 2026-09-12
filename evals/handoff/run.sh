@@ -61,7 +61,13 @@ rm -rf "$WORK"; mkdir -p "$WORK"/{raw,seeds,sandboxes,out}
 command -v promptdiff >/dev/null 2>&1 || { echo "promptdiff not installed: bun add -g @theaiteam/promptdiff" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq required" >&2; exit 1; }
 
-pd() { env -u CMUX_SURFACE_ID -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT promptdiff "$@"; }
+# HANDOFF_LANE=progress pins both arms to the same lane regardless of TMUX_PANE
+# or other lane env vars present on the machine running the eval. Without it,
+# a run started inside a tmux pane makes the handoff skill resolve a
+# pane-derived lane (e.g. `.handoff/_7.md`) instead of `.handoff/progress.md`,
+# which the write.json grader and the resume/continue seeding below both
+# hardcode.
+pd() { env -u CMUX_SURFACE_ID -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT HANDOFF_LANE=progress promptdiff "$@"; }
 
 mkrepo() { # mkrepo <dir>
   git -C "$1" init -q -b main

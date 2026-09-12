@@ -5,7 +5,7 @@ description: Writes the session's working state to a progress file so you can cl
 
 # Handoff
 
-Capture the current work state into `.handoff/progress.md`, so the conversation can be cleared and resumed at a fraction of the token cost.
+Capture the current work state into `.handoff/<lane>.md`, so the conversation can be cleared and resumed at a fraction of the token cost. The lane keys the file to the seat you are running in (see Step 2), not to the repository, so multiple sessions sharing a repo each get their own file.
 
 ## Why this exists
 
@@ -30,9 +30,24 @@ If the argument is `done`, go to **Step 7**. If it is `check`, go to **Step 8**.
 
 ## Step 2: Locate the progress file
 
-The progress file lives at `.handoff/progress.md`, relative to the repository root (`git rev-parse --show-toplevel`). If not in a git repository, use the current working directory and say so.
+Resolve the **lane** first. A lane is whatever survives `/clear` (a pane, not the workspace it sits in), not the repository, so keying the filename by lane is what lets several sessions share a repo without overwriting each other's state. Get it by running the shared resolver script rather than re-deriving it:
 
-Create `.handoff/` if it does not exist. If `.handoff/progress.md` does not exist, this is the first handoff for this work — create it. Do not treat a missing file as an error.
+```bash
+lane="$(bash "$CLAUDE_SKILL_DIR/scripts/lane.sh")"
+```
+
+If that variable is not set, use the directory this `SKILL.md` was loaded from. `lane.sh` takes the first of these that is set, sanitized so an unexpected value cannot walk the path outside `.handoff/`:
+
+1. `$HANDOFF_LANE`
+2. `$HERDR_PANE_ID` (herdr's pane-scoped id — not `$HERDR_WORKSPACE_ID`, which is shared by every tab and pane in a workspace and would collapse them onto one lane)
+3. `$TMUX_PANE`
+4. the literal `progress`, if none of the above are set — this reproduces today's single-file behavior for a session with no resolvable lane
+
+The progress file lives at `.handoff/<lane>.md`, relative to the repository root (`git rev-parse --show-toplevel`). If not in a git repository, use the current working directory and say so.
+
+Create `.handoff/` if it does not exist. If `.handoff/<lane>.md` does not exist, this is the first handoff for this lane — create it. Do not treat a missing file as an error.
+
+**Stale lanes are not cleaned up.** Nothing prunes `.handoff/<lane>.md` when its pane or workspace closes without `/handoff done`. A tmux or herdr pane id can be reused after a restart, so a session that inherits a reused or hand-set lane id also inherits whatever stale state a previous, unrelated session left in that file. There is no automatic detection for this today; treat an unexpectedly-populated lane file as a sign the id may be recycled.
 
 **Deliberately not `.claude/`.** That directory is treated as a sensitive path and writes to it are denied outright in sandboxed, headless, and CI contexts, with no way to grant permission non-interactively. A handoff that silently produces no file is worse than no handoff at all. `.handoff/` is an ordinary directory, so there is one canonical location and no fallback to reason about. `.claude/` is also Claude Code's *configuration* directory — settings, skills, agents — and session state is not configuration.
 
@@ -121,7 +136,7 @@ Get the stamp values from `git rev-parse --abbrev-ref HEAD`, `git rev-parse --sh
 
 ## Step 6: Write the checks file
 
-Write `.handoff/progress.checks.md`. This is what makes the handoff testable instead of hoped-for.
+Write `.handoff/<lane>.checks.md`, using the same lane resolved in Step 2. This is what makes the handoff testable instead of hoped-for.
 
 Generate 6 to 8 questions whose answers are knowable **only** from the session that is about to be cleared — not from reading the repository. Good questions probe the lossy parts:
 
@@ -136,7 +151,7 @@ Answer each one now, while full context is still live. Those answers are the gro
 ```markdown
 # Handoff checks
 
-Generated: <timestamp> | against: progress.md @ <head sha>
+Generated: <timestamp> | against: <lane>.md @ <head sha>
 
 Re-answer these after resuming from a cleared context, then run
 `/handoff check` to score. Questions the resumed session cannot answer
@@ -156,12 +171,13 @@ Then tell the user the file is written, note how many checks were generated, and
 
 The work is finished or being set aside.
 
-1. Read `.handoff/progress.md`. If it does not exist, say so and stop.
-2. Create `.handoff/progress-archive/` if needed.
-3. Move the file to `.handoff/progress-archive/<YYYY-MM-DD>-<slug>.md`, where the slug comes from the progress title, lowercased and hyphenated. If that path exists, append `-2`, `-3`, and so on.
-4. Append a closing stamp to the archived file: the final state, and one line on how the work actually ended.
-5. Delete `.handoff/progress.checks.md` — it describes a session that no longer exists.
-6. Confirm what was archived and where.
+1. Resolve the lane as in Step 2.
+2. Read `.handoff/<lane>.md`. If it does not exist, say so and stop.
+3. Create `.handoff/progress-archive/` if needed.
+4. Move the file to `.handoff/progress-archive/<YYYY-MM-DD>-<lane>-<slug>.md`, where the slug comes from the progress title, lowercased and hyphenated. If that path exists, append `-2`, `-3`, and so on.
+5. Append a closing stamp to the archived file: the final state, and one line on how the work actually ended.
+6. Delete `.handoff/<lane>.checks.md` — it describes a session that no longer exists.
+7. Confirm what was archived and where.
 
 Archive rather than delete. It costs nothing, it silences the session hook, and it leaves a record of how the work went.
 
@@ -169,7 +185,7 @@ Archive rather than delete. It costs nothing, it silences the session hook, and 
 
 Run this in a **resumed** session, after clearing and reloading the progress file.
 
-1. Read `.handoff/progress.checks.md`.
+1. Resolve the lane as in Step 2, then read `.handoff/<lane>.checks.md`.
 2. Answer every question using only what is currently in context — the progress file and anything read since. Do not consult the archive.
 3. Compare each answer against its **Expected** value.
 4. Report a table: question, hit or miss, and for each miss, what the progress file should have carried.
@@ -195,13 +211,13 @@ If the script is missing — an older install, or a copy that did not ship it �
 
 ## The session hook
 
-`scripts/session-start.sh` reloads the progress file automatically when a new session starts, so resuming requires nothing to remember.
+`scripts/session-start.sh` reloads the progress file automatically when a new session starts, so resuming requires nothing to remember. It resolves the lane the same way Step 2 does and loads only that lane's file, never another seat's.
 
 Context reaches the model through `hookSpecificOutput.additionalContext`; plain stdout only lands in the transcript. Warnings go to `systemMessage`, since a warning is for the human, not the model.
 
 It refuses to inject in three cases, each of which is worse than staying quiet:
 
-- **no progress file** — nothing to say
+- **no progress file for this lane** — nothing to say
 - **stale** — a file from a different branch or from days ago arrives looking current
 - **oversized** — a bloated file re-injected on every session is exactly the context bloat this skill exists to prevent
 
@@ -228,6 +244,8 @@ The equivalent by hand, in `settings.json`:
 }
 ```
 
-Tunable with `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000, roughly 6k tokens), and `HANDOFF_IGNORE_BRANCH=1` to skip the branch check.
+Tunable with `HANDOFF_LANE` to name the seat explicitly (falls back to `$HERDR_PANE_ID`, then `$TMUX_PANE`, then `progress`), `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000, roughly 6k tokens), and `HANDOFF_IGNORE_BRANCH=1` to skip the branch check.
+
+If a lane var resolves to a file that has never been written but a pre-seat-keying `.handoff/progress.md` exists, the hook reports that once via `systemMessage` instead of silently doing nothing — that file is orphaned and needs a manual rename to `.handoff/<lane>.md`, or a `/handoff done` to archive it.
 
 The script needs `jq` or `python3` to emit its JSON payload. With neither available it exits silently rather than printing text that would be mistaken for context. `install-hook.sh` requires `python3` specifically, and prints the JSON block above if it is missing.

@@ -75,9 +75,9 @@ Captures the session's working state to a progress file so you can clear a bloat
 - **States conclusions, then points** — the resumed session should be able to act without opening a file; paths attach as corroboration rather than replacing the finding. A pointer that stands in for a conclusion just defers the cost to the reader
 - **Writes to `.handoff/`, not `.claude/`** — the latter is a guarded path where writes are denied outright in sandboxed, headless, and CI contexts, and it is Claude Code's configuration directory besides. Session state is not configuration
 - **Records what the repo cannot tell you** — why an approach was rejected, what failed and how, what the user asked for in their own framing
-- **Emits a self-test** — a `progress.checks.md` of questions answerable only from the pre-clear session, so information loss becomes a number instead of a feeling
+- **Emits a self-test** — a `.handoff/<lane>.checks.md` of questions answerable only from the pre-clear session, so information loss becomes a number instead of a feeling
 - **Guards against staleness and bloat** — the file stamps repo, branch, and timestamp; a progress file from another branch, from days ago, or grown past a size cap warns instead of loading
-- **Archives on completion** — `/handoff done` moves the file to `.handoff/progress-archive/` rather than deleting it
+- **Archives on completion** — `/handoff done` moves the file to `.handoff/progress-archive/<date>-<lane>-<slug>.md` rather than deleting it
 - **Reloads automatically** — a `SessionStart` hook re-injects the progress file, so resuming needs nothing remembered. `/handoff install` registers it, because nothing else will
 
 This is not a replacement for auto-compaction so much as a better-timed, curated alternative to it: compaction fires late and does not let you choose what survives.
@@ -99,7 +99,7 @@ In Claude Code, run:
 /handoff install
 ```
 
-`/handoff` writes `.handoff/progress.md` and `.handoff/progress.checks.md`. Clear the context, resume, then `/handoff check` scores the resumed session against the checks to show what the handoff dropped. `/handoff done` archives everything when the work is finished.
+`/handoff` writes `.handoff/<lane>.md` and `.handoff/<lane>.checks.md`, where `<lane>` keys the files to the seat you're running in rather than to the repository, so multiple sessions sharing a repo each get their own file. `<lane>` resolves from `$HANDOFF_LANE`, then `$HERDR_PANE_ID`, then `$TMUX_PANE`, then falls back to the literal `progress` — a session with none of those set gets `.handoff/progress.md`, exactly as before. Set `HANDOFF_LANE` directly to force a specific lane name. Clear the context, resume, then `/handoff check` scores the resumed session against the checks to show what the handoff dropped. `/handoff done` archives everything when the work is finished.
 
 #### Session hook
 
