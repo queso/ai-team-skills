@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # SessionStart hook for the `handoff` skill.
 #
-# Reloads .handoff/progress.md into a new session so that resuming after a
-# context clear requires nothing to remember.
+# Reloads .handoff/<lane>.md into a new session so that resuming after a
+# context clear requires nothing to remember. State is keyed by lane, not by
+# repo: a lane is whatever survives /clear (a pane or a workspace), so
+# multiple sessions sharing a repo each get their own file instead of
+# clobbering one another.
+#
+# Lane resolution, first set wins:
+#   $HANDOFF_LANE, $HERDR_WORKSPACE_ID, $TMUX_PANE, else "progress"
+# A session with no resolvable lane falls back to the single shared
+# .handoff/progress.md this replaces, and loads only its own lane's file —
+# never another seat's.
 #
 # Output contract: context reaches the model only via
 # hookSpecificOutput.additionalContext — plain stdout lands in the transcript,
@@ -18,13 +27,21 @@
 #                                  the context bloat this skill exists to prevent)
 #
 # Env:
+#   HANDOFF_LANE           lane name, overriding $HERDR_WORKSPACE_ID/$TMUX_PANE
 #   HANDOFF_MAX_AGE_DAYS   staleness cutoff in days (default 3)
 #   HANDOFF_MAX_BYTES      size cutoff (default 24000, roughly 6k tokens)
 #   HANDOFF_IGNORE_BRANCH  set to 1 to skip the branch check
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
-progress="$root/.handoff/progress.md"
+
+# Sanitized so an env var cannot walk the path outside .handoff/ or otherwise
+# produce a surprising filename.
+lane="${HANDOFF_LANE:-${HERDR_WORKSPACE_ID:-${TMUX_PANE:-progress}}}"
+lane="$(printf '%s' "$lane" | tr -c 'A-Za-z0-9._-' '_')"
+[ -n "$lane" ] || lane="progress"
+
+progress="$root/.handoff/$lane.md"
 [ -f "$progress" ] || exit 0
 
 max_age="${HANDOFF_MAX_AGE_DAYS:-3}"
@@ -77,7 +94,7 @@ if [ -z "$warn" ]; then
 fi
 
 if [ -n "$warn" ]; then
-  emit systemMessage "handoff: .handoff/progress.md was NOT loaded — $warn. Archive it with /handoff done, or read it directly if it is still relevant."
+  emit systemMessage "handoff: .handoff/$lane.md was NOT loaded — $warn. Archive it with /handoff done, or read it directly if it is still relevant."
   exit 0
 fi
 
