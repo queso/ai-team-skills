@@ -33,8 +33,18 @@ function readJson(path: string) {
 
 /** The commands of every SessionStart hook registered in a settings file. */
 function sessionStartCommands(path: string): string[] {
-  const matchers = readJson(path).hooks?.SessionStart ?? [];
+  return eventCommands(path, "SessionStart");
+}
+
+/** The commands of every hook registered for `event` in a settings file. */
+function eventCommands(path: string, event: string): string[] {
+  const matchers = readJson(path).hooks?.[event] ?? [];
   return matchers.flatMap((m: { hooks?: { command?: string }[] }) => (m.hooks ?? []).map((h) => h.command ?? ""));
+}
+
+/** The commands of every Stop hook registered in a settings file. */
+function stopCommands(path: string): string[] {
+  return eventCommands(path, "Stop");
 }
 
 beforeEach(() => {
@@ -185,5 +195,123 @@ describe("install-hook.sh", () => {
     run(["--user"]);
 
     expect(readJson(`${userSettings()}.handoff-backup`)).toEqual({ model: "opus" });
+  });
+
+  describe("--idle-timer", () => {
+    it("a default install registers SessionStart and NOT Stop", () => {
+      run(["--user"]);
+
+      expect(sessionStartCommands(userSettings())).toHaveLength(1);
+      expect(stopCommands(userSettings())).toHaveLength(0);
+    });
+
+    it("registers both SessionStart and Stop", () => {
+      run(["--user", "--idle-timer"]);
+
+      const sessionStart = sessionStartCommands(userSettings());
+      const stop = stopCommands(userSettings());
+      expect(sessionStart).toHaveLength(1);
+      expect(sessionStart[0]).toContain("session-start.sh");
+      expect(stop).toHaveLength(1);
+      expect(stop[0]).toContain("idle-timer.sh");
+    });
+
+    it("is idempotent — a second run changes nothing", () => {
+      run(["--user", "--idle-timer"]);
+      const first = readFileSync(userSettings(), "utf-8");
+
+      const output = run(["--user", "--idle-timer"]);
+
+      expect(output).toContain("already registered");
+      expect(readFileSync(userSettings(), "utf-8")).toBe(first);
+    });
+
+    it("updates a Stop hook recorded at a stale path instead of adding a second one", () => {
+      writeFileSync(
+        userSettings(),
+        JSON.stringify({
+          hooks: {
+            Stop: [
+              {
+                hooks: [{ type: "command", command: 'bash "/old/path/handoff/scripts/idle-timer.sh"' }],
+              },
+            ],
+          },
+        }),
+      );
+
+      const output = run(["--user", "--idle-timer"]);
+
+      expect(output).toContain("updated in");
+      const commands = stopCommands(userSettings());
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).not.toContain("/old/path");
+      // SessionStart was absent and gets freshly added alongside the update.
+      expect(sessionStartCommands(userSettings())).toHaveLength(1);
+    });
+
+    it("--uninstall removes both SessionStart and Stop", () => {
+      run(["--user", "--idle-timer"]);
+
+      run(["--user", "--uninstall"]);
+
+      expect(readJson(userSettings()).hooks).toBeUndefined();
+    });
+
+    it("--uninstall --idle-timer removes only Stop and leaves SessionStart intact", () => {
+      run(["--user", "--idle-timer"]);
+
+      run(["--user", "--uninstall", "--idle-timer"]);
+
+      expect(sessionStartCommands(userSettings())).toHaveLength(1);
+      expect(stopCommands(userSettings())).toHaveLength(0);
+    });
+
+    it("uninstall does not remove or prune an unrelated user-authored hook on either event", () => {
+      writeFileSync(
+        userSettings(),
+        JSON.stringify({
+          hooks: {
+            SessionStart: [{ hooks: [{ type: "command", command: "echo unrelated-session-start" }] }],
+            Stop: [{ hooks: [{ type: "command", command: "echo unrelated-stop" }] }],
+          },
+        }),
+      );
+      run(["--user", "--idle-timer"]);
+
+      run(["--user", "--uninstall"]);
+
+      expect(sessionStartCommands(userSettings())).toEqual(["echo unrelated-session-start"]);
+      expect(stopCommands(userSettings())).toEqual(["echo unrelated-stop"]);
+      // Both event keys still hold the unrelated hook, so neither is deleted.
+      expect(readJson(userSettings()).hooks.SessionStart).toBeDefined();
+      expect(readJson(userSettings()).hooks.Stop).toBeDefined();
+    });
+
+    it("uninstall --idle-timer does not delete the Stop event key when it still holds an unrelated hook", () => {
+      writeFileSync(
+        userSettings(),
+        JSON.stringify({
+          hooks: {
+            Stop: [{ hooks: [{ type: "command", command: "echo unrelated-stop" }] }],
+          },
+        }),
+      );
+      run(["--user", "--idle-timer"]);
+
+      run(["--user", "--uninstall", "--idle-timer"]);
+
+      expect(stopCommands(userSettings())).toEqual(["echo unrelated-stop"]);
+      expect(readJson(userSettings()).hooks.Stop).toBeDefined();
+    });
+
+    it("--dry-run with --idle-timer writes nothing", () => {
+      const output = run(["--user", "--idle-timer", "--dry-run"]);
+
+      const parsed = JSON.parse(output);
+      expect(parsed.hooks.SessionStart).toHaveLength(1);
+      expect(parsed.hooks.Stop).toHaveLength(1);
+      expect(existsSync(userSettings())).toBe(false);
+    });
   });
 });

@@ -79,6 +79,7 @@ Captures the session's working state to a progress file so you can clear a bloat
 - **Guards against staleness and bloat** — the file stamps repo, branch, and timestamp; a progress file from another branch, from days ago, or grown past a size cap warns instead of loading
 - **Archives on completion** — `/handoff done` moves the file to `.handoff/progress-archive/<date>-<lane>-<slug>.md` rather than deleting it
 - **Reloads automatically** — a `SessionStart` hook re-injects the progress file, so resuming needs nothing remembered. `/handoff install` registers it, because nothing else will
+- **Can arm an opt-in idle timer** — `/handoff install --idle-timer` also registers a `Stop` hook that submits `/handoff` for you if the session sits idle long enough to risk the prompt cache lapsing. It never triggers `/clear`; the write is all it automates, clearing stays the user's call
 
 This is not a replacement for auto-compaction so much as a better-timed, curated alternative to it: compaction fires late and does not let you choose what survives.
 
@@ -135,6 +136,16 @@ The equivalent by hand, in `settings.json`:
 The hook injects via `hookSpecificOutput.additionalContext` (plain stdout would only reach the transcript, not the model) and sends warnings to `systemMessage`. It stays silent when no progress file exists, and warns rather than injecting when the file is stale or oversized.
 
 Tune with `HANDOFF_MAX_AGE_DAYS` (default 3), `HANDOFF_MAX_BYTES` (default 24000), and `HANDOFF_IGNORE_BRANCH=1`. Requires `jq` or `python3`.
+
+#### Idle timer
+
+`scripts/idle-timer.sh` is an opt-in `Stop` hook: at the end of every turn it cancels any timer the lane already had armed and arms a fresh one for `HANDOFF_IDLE_MINUTES` (default 58, comfortably under the ~60 minute prompt-cache TTL). If the session is still idle when it fires, it injects `/handoff` into the live pane — the handoff write itself still happens in the model's own session, since summarizing working state isn't something a detached script can do. It never triggers `/clear`; that stays the user's call.
+
+It needs `$TMUX_PANE` or `$HERDR_PANE_ID` to have anything to inject into, so a bare terminal gets no timer and no error. The tmux injection path is verified end to end; the herdr path is implemented the same way but has not been confirmed against a live herdr pane.
+
+Enable it with `/handoff install --idle-timer` (also registers the session hook above). `--uninstall --idle-timer` removes just the timer; `--uninstall` alone removes both. `HANDOFF_IDLE_TIMER=0` turns it off at runtime without uninstalling. Tune with `HANDOFF_IDLE_MINUTES`, `HANDOFF_IDLE_MIN_BYTES` (default 2000, a transcript-size floor below which nothing arms), and `HANDOFF_IDLE_COOLDOWN_SECONDS` (default 120, so a fresh write doesn't immediately get re-armed).
+
+If there was text typed in the input box when the timer fired, it is salvaged to `.handoff/<lane>.draft.txt` before the line is cleared to make room for the injected command — otherwise the injection would concatenate with the typed text and silently produce no handoff.
 
 ### review-repo
 
