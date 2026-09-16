@@ -15,6 +15,12 @@ import { join } from "node:path";
 import { REPO_ROOT } from "./helpers";
 
 const SCRIPT = join(REPO_ROOT, "handoff", "scripts", "idle-timer.sh");
+// A trimmed excerpt of a real `tmux capture-pane -p -J` of a Claude Code pane
+// (2026-09-16). Private text is replaced with bracketed placeholders and the
+// trailing padding spaces -J preserves are removed from every row; the two
+// prompt rows and the rules around the box are the observed bytes, untouched.
+// See the "input-marker premise" tests for what it pins.
+const PANE_CAPTURE_FIXTURE = join(REPO_ROOT, "tests", "fixtures", "pane-capture.txt");
 
 // Claude Code's input line begins with U+276F (the glyph) followed by a
 // NON-BREAKING SPACE (U+00A0), not an ASCII space, confirmed by hexdumping
@@ -781,6 +787,76 @@ describe("idle-timer.sh fire mode", () => {
     const log = readFileSync(tmuxLog, "utf-8");
     expect(log).not.toContain("/handoff");
     expect(existsSync(pidfilePath("main"))).toBe(false);
+  });
+});
+
+describe("idle-timer.sh input-marker premise", () => {
+  // INPUT_MARKER above and the script's own input_marker are built
+  // independently from numeric escapes, but both encode one premise about
+  // what Claude Code renders at the start of its input line. These tests pin
+  // that premise to bytes that were observed, so a change to either constant
+  // fails here instead of only against a live pane.
+
+  it("INPUT_MARKER is the byte sequence hexdump showed on a live input line", () => {
+    // Hexdump of a live capture: the input line began e2 9d af c2 a0
+    // (U+276F then U+00A0); a past prompt echoed into the transcript above
+    // it began e2 9d af 20 (U+276F then an ASCII space).
+    expect(Buffer.from(INPUT_MARKER, "utf8").toString("hex")).toBe("e29dafc2a0");
+    expect(Buffer.from(ASCII_SPACE_LOOKALIKE, "utf8").toString("hex")).toBe("e29daf20");
+  });
+
+  it("the live capture fixture has one marker row, found by the same start-of-row rule the script uses", () => {
+    // The box was empty when the pane was captured, so the marker row is the
+    // glyph, the NBSP, and nothing else: the common idle case the timer
+    // exists for. Rows are trimmed on the right the way salvage_draft trims
+    // them; the fixture already has no trailing padding, so this is a no-op
+    // that keeps the comparison honest if the file is ever regenerated.
+    const rows = readFileSync(PANE_CAPTURE_FIXTURE, "utf-8")
+      .split("\n")
+      .map((row) => row.replace(/[ \t]+$/, ""));
+
+    // Same anchoring as salvage_draft's `"$input_marker"*)` case: start of row.
+    const markerRows = rows.filter((row) => row.startsWith(INPUT_MARKER));
+    expect(markerRows).toEqual([INPUT_MARKER]);
+    const markerIndex = rows.findIndex((row) => row.startsWith(INPUT_MARKER));
+
+    // The file holds those bytes on a row of their own, so the assertion
+    // above is about the observed bytes and not about how the string decoded.
+    expect(readFileSync(PANE_CAPTURE_FIXTURE).toString("hex")).toContain("0ae29dafc2a00a");
+
+    // The box is bracketed by the "─" rules the script's is_box_rule matches.
+    expect(rows[markerIndex - 1]?.startsWith("─")).toBe(true);
+    expect(rows[markerIndex + 1]?.startsWith("─")).toBe(true);
+
+    // The echoed past prompt is in the same capture and starts with the
+    // ASCII-space lookalike; a substring search for the glyph alone, which
+    // the anchored match replaced, would have found both rows.
+    expect(rows.filter((row) => row.startsWith(ASCII_SPACE_LOOKALIKE))).toHaveLength(1);
+    expect(rows.filter((row) => row.includes("\u276F"))).toHaveLength(2);
+
+    // An NBSP also occurs mid-row in ordinary chrome, so the NBSP alone is
+    // not what identifies the input line either; only the start-of-row
+    // match keeps such a row from counting.
+    expect(rows.some((row) => !row.startsWith(INPUT_MARKER) && row.includes("\u00A0"))).toBe(true);
+  });
+
+  it("clears and submits /handoff with no draft file when served the live capture fixture", () => {
+    writeFileSync(tmuxCapture, readFileSync(PANE_CAPTURE_FIXTURE));
+
+    run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("/handoff"), 5000)).toBe(true);
+    Bun.sleepSync(200);
+
+    const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
+    expect(calls.filter((c) => c.startsWith("send-keys"))).toEqual([
+      "send-keys -t %1 C-u",
+      "send-keys -t %1 /handoff Enter",
+    ]);
+    expect(existsSync(draftPath("main"))).toBe(false);
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
   });
 });
 
