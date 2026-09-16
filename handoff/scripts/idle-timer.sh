@@ -186,19 +186,31 @@ is_blank() {
   [ -z "$(printf '%s' "$stripped" | tr -d '[:space:]')" ]
 }
 
+# is_box_rule <row> — true if <row> is one of the horizontal rules Claude
+# Code draws above and below the input box. Observed in a live pane: the box
+# renders as a rule of "─" characters, the marker row, another rule, then the
+# status line. The rule under the box is what marks where a multi-line draft
+# ends.
+is_box_rule() {
+  case "$1" in
+    "─"*) return 0 ;;
+  esac
+  return 1
+}
+
 # salvage_draft — best-effort capture of whatever is currently typed in the
-# prompt line, written to a recoverable file before we clear that line. This
+# input box, written to a recoverable file before we clear that box. This
 # was an explicit call from Josh: the timer may interrupt a half-typed
 # message, but it must never destroy one irrecoverably.
 #
-# We isolate just the input line rather than writing the whole screen: a raw
+# We isolate just the input box rather than writing the whole screen: a raw
 # full-pane dump is never whitespace-only in a live Claude Code pane (there
 # is always chrome — the previous turn's output, the status line), so a
 # blanket "skip if empty" guard on the full capture never actually fires,
 # and a file written on every single fire regardless of whether anything was
 # typed is not a recoverable draft, it is noise the user learns to ignore.
 #
-# Matching is anchored to the START of a line, not a substring search: plain
+# Matching is anchored to the START of a row, not a substring search: plain
 # scrollback commonly contains "❯ " (with an ordinary ASCII space) from past
 # turns rendered back in the transcript, and a substring match can pick one
 # of those instead of the real input line — confirmed against a live
@@ -209,18 +221,46 @@ is_blank() {
 # byte sequence to be mistaken for the input line, which real transcript
 # text does not.
 #
-# We take the LAST such line, since the live input line is what's rendered
+# We take the LAST such row, since the live input box is what's rendered
 # at the bottom of a multi-line capture.
 #
+# Two things make a draft occupy more than one screen row, and they need
+# opposite treatment:
+#
+#   A wrapped line: one logical line longer than the pane is wide. tmux's
+#   `-J` joins the wrapped rows back into the single line the user typed,
+#   so a wrap never shows up as a second row here. (-J also preserves the
+#   trailing spaces on every row, which is why each row is trimmed on the
+#   right before it is looked at.)
+#
+#   A multi-line draft: the box grows one row per logical line, and Claude
+#   Code renders each continuation row with a two-space indent under the
+#   text after the marker. We keep the marker row and every row after it up
+#   to the rule that closes the box, dropping that render indent. If no
+#   closing rule ever appears (a layout this script has not seen), the box
+#   is cut at the first blank row instead, so the status line cannot be
+#   swallowed into the draft.
+#
 # Return value doubles as the go/no-go signal for injection: 0 means the
-# input line was found and it is safe to clear and submit into it; 1 means
-# no marker was found, and fire_mode must not send any keys. The marker's
-# absence is this script's own evidence that the pane is not showing the
-# Claude Code input box. The likeliest thing an hour-idle session is showing
-# instead is a pending permission or plan-approval dialog: Stop does not fire
-# for a turn blocked on a dialog, so the timer armed by the previous turn
-# stays live, and sending C-u then Enter into that dialog would select
-# whichever option is highlighted. No marker means no injection.
+# box was found and holds at most one line, so it is safe to clear and
+# submit into; 1 means fire_mode must not send any keys, for one of two
+# reasons.
+#
+# No marker: the marker's absence is this script's own evidence that the
+# pane is not showing the Claude Code input box. The likeliest thing an
+# hour-idle session is showing instead is a pending permission or
+# plan-approval dialog: Stop does not fire for a turn blocked on a dialog,
+# so the timer armed by the previous turn stays live, and sending C-u then
+# Enter into that dialog would select whichever option is highlighted.
+#
+# A multi-line draft: Claude Code's Ctrl+U deletes from the cursor to the
+# start of the CURRENT line only (its docs say to repeat it to clear across
+# lines in multiline input). This script cannot see where the cursor is or
+# how many presses would empty the box, so injecting on top of a multi-line
+# draft could submit the leftover lines plus /handoff as prose, exactly the
+# failure the clear exists to prevent. Instead the draft file is written and
+# the box is left as it was. The cost is one redundant idle turn, never a
+# corrupted command.
 #
 # A Claude Code auto-suggested "ghost" hint renders indistinguishably from
 # real typed text after the marker (confirmed in the same probe), and there
@@ -231,23 +271,46 @@ salvage_draft() {
   draft="$root/.handoff/$lane.draft.txt"
   captured=""
   case "$pane_kind" in
-    tmux)  captured="$(tmux capture-pane -t "$pane_target" -p 2>/dev/null)" ;;
+    tmux)  captured="$(tmux capture-pane -t "$pane_target" -p -J 2>/dev/null)" ;;
+    # herdr's pane read has no documented equivalent of -J, so a wrapped
+    # line is salvaged as it renders there: one row per wrap.
     herdr) captured="$(herdr pane read "$pane_target" --source visible 2>/dev/null)" ;;
   esac
 
-  marker_line=""
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      "$input_marker"*) marker_line="$line" ;;
+  box=""; box_rows=0; in_box=0; box_closed=0
+  while IFS= read -r row || [ -n "$row" ]; do
+    row="${row%"${row##*[![:space:]]}"}"
+    case "$row" in
+      "$input_marker"*)
+        box="${row#"$input_marker"}"; box_rows=1; in_box=1; box_closed=0 ;;
+      *)
+        [ "$in_box" = 1 ] || continue
+        if is_box_rule "$row"; then
+          in_box=0; box_closed=1
+        else
+          box="$box"$'\n'"${row#"  "}"; box_rows=$(( box_rows + 1 ))
+        fi ;;
     esac
   done <<<"$captured"
 
-  if [ -n "$marker_line" ]; then
-    remainder="${marker_line#"$input_marker"}"
-    # A blank remainder is the common case for a timer that actually fires:
-    # the session sat idle with nothing typed. Nothing to salvage — leave no
+  if [ "$box_rows" -gt 1 ] && [ "$box_closed" = 0 ]; then
+    cut=""; cut_rows=0
+    while IFS= read -r row; do
+      if [ "$cut_rows" -gt 0 ] && is_blank "$row"; then break; fi
+      if [ "$cut_rows" -eq 0 ]; then cut="$row"; else cut="$cut"$'\n'"$row"; fi
+      cut_rows=$(( cut_rows + 1 ))
+    done <<<"$box"
+    box="$cut"; box_rows="$cut_rows"
+  fi
+
+  if [ "$box_rows" -gt 0 ]; then
+    # A blank box is the common case for a timer that actually fires: the
+    # session sat idle with nothing typed. Nothing to salvage — leave no
     # file rather than one that looks like a draft but isn't.
-    is_blank "$remainder" || write_draft_file "$remainder"
+    is_blank "$box" || write_draft_file "$box"
+    # More than one row means a multi-line draft: salvaged in full above,
+    # but not safe to clear with a single C-u. See the header comment.
+    [ "$box_rows" -eq 1 ] || return 1
     return 0
   fi
 
@@ -362,11 +425,13 @@ fire_mode() {
   current="$(file_mtime "$progress")"
   [ "$current" = "$snapshot" ] || exit 0
 
-  # salvage_draft returns non-zero when it cannot find the input-line marker.
-  # That is the last gate before sending keys: the pane may be sitting on a
+  # salvage_draft returns non-zero when it cannot find the input-line marker
+  # or when the draft it found spans more than one line. That is the last
+  # gate before sending keys: with no marker the pane may be sitting on a
   # permission or plan-approval dialog, and Enter there selects the
-  # highlighted option. No marker means no injection, so exit without
-  # touching the pane at all.
+  # highlighted option; with a multi-line draft a single C-u does not empty
+  # the box, and Enter would submit the leftovers plus /handoff as prose.
+  # Either way, exit without touching the pane at all.
   salvage_draft || exit 0
   clear_input
   submit_handoff

@@ -28,6 +28,7 @@ let bin: string;
 let tmuxLog: string;
 let tmuxPanes: string;
 let tmuxCapture: string;
+let tmuxCaptureJoined: string;
 let bigTranscript: string;
 
 // Timer processes armed by a test (idle-timer.sh --fire, its own process
@@ -91,6 +92,7 @@ function run(payload: Record<string, unknown>, env: Record<string, string> = {})
       TMUX_STUB_LOG: tmuxLog,
       TMUX_STUB_PANES: tmuxPanes,
       TMUX_STUB_CAPTURE: tmuxCapture,
+      TMUX_STUB_CAPTURE_JOINED: tmuxCaptureJoined,
       ...env,
     },
   });
@@ -118,14 +120,27 @@ beforeEach(() => {
   // Records every invocation to TMUX_STUB_LOG so tests can assert on the
   // exact call sequence, and answers the two read commands idle-timer.sh
   // actually issues (list-panes for existence, capture-pane for salvage)
-  // from files the test controls.
+  // from files the test controls. Real tmux joins wrapped rows back into
+  // one logical line only when capture-pane is passed -J; the stub models
+  // that by serving TMUX_STUB_CAPTURE_JOINED (when a test has written one)
+  // for a -J call and the raw, row-per-wrap TMUX_STUB_CAPTURE otherwise, so
+  // a script that forgets the flag sees the wrapped form real tmux would
+  // give it.
   writeFileSync(
     tmuxStub,
     `#!/usr/bin/env bash
 echo "$@" >> "$TMUX_STUB_LOG"
 case "$1" in
   list-panes) cat "$TMUX_STUB_PANES" 2>/dev/null ;;
-  capture-pane) cat "$TMUX_STUB_CAPTURE" 2>/dev/null ;;
+  capture-pane)
+    joined=0
+    for arg in "$@"; do [ "$arg" = "-J" ] && joined=1; done
+    if [ "$joined" = 1 ] && [ -s "$TMUX_STUB_CAPTURE_JOINED" ]; then
+      cat "$TMUX_STUB_CAPTURE_JOINED"
+    else
+      cat "$TMUX_STUB_CAPTURE" 2>/dev/null
+    fi
+    ;;
 esac
 exit 0
 `,
@@ -136,9 +151,11 @@ exit 0
   tmuxLog = join(state, "tmux.log");
   tmuxPanes = join(state, "panes.txt");
   tmuxCapture = join(state, "capture.txt");
+  tmuxCaptureJoined = join(state, "capture-joined.txt");
   writeFileSync(tmuxLog, "");
   writeFileSync(tmuxPanes, "%1\n");
   writeFileSync(tmuxCapture, "");
+  writeFileSync(tmuxCaptureJoined, "");
 
   bigTranscript = join(state, "transcript.jsonl");
   writeFileSync(bigTranscript, "x".repeat(3000));
@@ -355,6 +372,82 @@ describe("idle-timer.sh fire mode", () => {
     const draft = readFileSync(draftPath("main"), "utf-8");
     expect(draft.trim()).toBe("half-typed draft text");
     expect(draft).not.toContain("previous turn's output");
+  });
+
+  it("joins a long single line that wrapped at the pane width, and still injects", () => {
+    // A wrapped line is one logical line rendered across two rows. Without
+    // -J, capture-pane hands back the two rows and only the first one starts
+    // with the marker, so the pre-wrap portion was all that got salvaged
+    // before C-u cleared the whole line. The stub serves the joined form
+    // only when -J is actually passed.
+    const head = "this is a long draft that runs past the right edge of the pane ";
+    const tail = "and keeps going on the next row";
+    writeFileSync(tmuxCapture, `chrome\n────────────\n${INPUT_MARKER}${head}\n${tail}\n────────────\n  status line`);
+    writeFileSync(
+      tmuxCaptureJoined,
+      `chrome\n────────────\n${INPUT_MARKER}${head}${tail}\n────────────\n  status line`,
+    );
+
+    run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("/handoff"), 5000)).toBe(true);
+
+    const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
+    const capture = calls.find((c) => c.startsWith("capture-pane"));
+    expect(capture).toBe("capture-pane -t %1 -p -J");
+
+    const draft = readFileSync(draftPath("main"), "utf-8");
+    expect(draft).toBe(`${head}${tail}\n`);
+
+    // One logical line is still one C-u away from empty, so injection goes ahead.
+    expect(calls.some((c) => c.includes("send-keys") && c.includes("C-u"))).toBe(true);
+    expect(calls.some((c) => c.includes("send-keys") && c.includes("/handoff"))).toBe(true);
+  });
+
+  it("salvages a three-line draft in full, without the render indent, and sends no keys", () => {
+    // Claude Code grows the box one row per logical line and indents each
+    // continuation row by two spaces under the text after the marker. The
+    // box is closed by the same "─" rule that opens it, then the status line.
+    // Ctrl+U in Claude Code clears to the start of the current line only, so
+    // a multi-line draft is written out and the box is left untouched: no
+    // C-u, no /handoff, a redundant idle turn instead of a corrupted command.
+    writeFileSync(
+      tmuxCapture,
+      `some previous turn's output\n────────────\n${INPUT_MARKER}line one\n  line two\n  line three\n────────────\n  [status line] bypass permissions on`,
+    );
+
+    run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => existsSync(draftPath("main")), 5000)).toBe(true);
+    const draft = readFileSync(draftPath("main"), "utf-8");
+    expect(draft).toBe("line one\nline two\nline three\n");
+    expect(draft).not.toContain("status line");
+    expect(draft).not.toContain("previous turn's output");
+
+    Bun.sleepSync(300);
+    expect(readFileSync(tmuxLog, "utf-8")).not.toContain("send-keys");
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+  });
+
+  it("cuts a multi-line draft at the first blank row when no closing rule follows the box", () => {
+    // A layout this script has not seen: the box is not closed by a rule.
+    // Rather than swallow the status line into the draft, stop at the first
+    // blank row. Still two rows of draft, so still no injection.
+    writeFileSync(tmuxCapture, `${INPUT_MARKER}line one\n  line two\n\n  [status line] bypass permissions on`);
+
+    run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => existsSync(draftPath("main")), 5000)).toBe(true);
+    expect(readFileSync(draftPath("main"), "utf-8")).toBe("line one\nline two\n");
+
+    Bun.sleepSync(300);
+    expect(readFileSync(tmuxLog, "utf-8")).not.toContain("send-keys");
   });
 
   it("writes no draft when the marker is found but the input line is empty (the common idle case)", () => {
