@@ -20,11 +20,31 @@ let sandbox: string;
 let home: string;
 
 /** Runs install-hook.sh with HOME pointed at the sandbox. */
-function run(args: string[] = [], opts: { script?: string } = {}) {
+function run(args: string[] = [], opts: { script?: string; cwd?: string } = {}) {
   return execFileSync("bash", [opts.script ?? SCRIPT, ...args], {
     env: { ...process.env, HOME: home },
     encoding: "utf-8",
+    cwd: opts.cwd,
   });
+}
+
+/** Creates an empty git repository under the sandbox and returns its path. */
+function initRepo(name: string): string {
+  const repo = join(sandbox, name);
+  mkdirSync(repo, { recursive: true });
+  execFileSync("git", ["init", "-q", repo], { env: { ...process.env, HOME: home } });
+  return repo;
+}
+
+const EXCLUDE_LINES = [".handoff/*.draft.txt", ".handoff/*.timer.pid"];
+
+/** The non-comment lines of a repo's .git/info/exclude, or [] if absent. */
+function excludeLines(repo: string): string[] {
+  const path = join(repo, ".git", "info", "exclude");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf-8")
+    .split("\n")
+    .filter((line) => line.trim() !== "" && !line.startsWith("#"));
 }
 
 function readJson(path: string) {
@@ -312,6 +332,60 @@ describe("install-hook.sh", () => {
       expect(parsed.hooks.SessionStart).toHaveLength(1);
       expect(parsed.hooks.Stop).toHaveLength(1);
       expect(existsSync(userSettings())).toBe(false);
+    });
+
+    // The draft file holds whatever was typed in the input box, verbatim. A
+    // --project install is scoped to one repo, so that repo's local exclude
+    // file is the right place to keep the timer's scratch files out of git.
+    describe("--project", () => {
+      it("lists the timer's scratch files in .git/info/exclude, once, across repeated runs", () => {
+        const repo = initRepo("repo");
+
+        run(["--project", "--idle-timer"], { cwd: repo });
+        run(["--project", "--idle-timer"], { cwd: repo });
+
+        const lines = excludeLines(repo);
+        for (const pattern of EXCLUDE_LINES) {
+          expect(lines.filter((line) => line === pattern)).toHaveLength(1);
+        }
+        expect(stopCommands(join(repo, ".claude", "settings.json"))).toHaveLength(1);
+      });
+
+      it("keeps entries the user already had in .git/info/exclude", () => {
+        const repo = initRepo("repo");
+        mkdirSync(join(repo, ".git", "info"), { recursive: true });
+        writeFileSync(join(repo, ".git", "info", "exclude"), "scratch/\n");
+
+        run(["--project", "--idle-timer"], { cwd: repo });
+
+        expect(excludeLines(repo)).toEqual(["scratch/", ...EXCLUDE_LINES]);
+      });
+
+      it("without --idle-timer does not touch .git/info/exclude", () => {
+        const repo = initRepo("repo");
+
+        run(["--project"], { cwd: repo });
+
+        expect(excludeLines(repo)).toEqual([]);
+      });
+    });
+
+    it("--user inside a git repo leaves that repo's .git/info/exclude alone", () => {
+      const repo = initRepo("repo");
+
+      run(["--user", "--idle-timer"], { cwd: repo });
+
+      expect(excludeLines(repo)).toEqual([]);
+      expect(stopCommands(userSettings())).toHaveLength(1);
+    });
+
+    it("--user outside any git repo succeeds", () => {
+      const plain = join(sandbox, "not-a-repo");
+      mkdirSync(plain, { recursive: true });
+
+      run(["--user", "--idle-timer"], { cwd: plain });
+
+      expect(stopCommands(userSettings())).toHaveLength(1);
     });
   });
 });

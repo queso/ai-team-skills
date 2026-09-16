@@ -280,6 +280,8 @@ Two extra files show up in `.handoff/`, both scoped to the lane:
 - `<lane>.timer.pid` — the armed timer's pid and a random token, so the next turn's Stop hook can find and cancel it. The token guards against a recycled pid being mistaken for the timer that wrote it.
 - `<lane>.draft.txt` — appears only if there was text sitting in the input box when the timer fired. Injecting `/handoff` has to clear that line first, or the injected command concatenates with whatever was typed and submits as prose, silently producing no handoff. Before clearing the line, the timer salvages it into this file rather than destroying it.
 
+The draft file holds the typed text verbatim, so if a password or private prose was sitting in the input box, that is what lands in the file. Nothing prunes it: it stays in `.handoff/` until you read it back and delete it. Keep both files out of git. This repo ignores `.handoff/` in its `.gitignore`; in another repo, `/handoff install --project --idle-timer` lists `.handoff/*.draft.txt` and `.handoff/*.timer.pid` in that repo's `.git/info/exclude`, while a user-level install is not tied to one repo and relies on the `.gitignore` reminder in Step 2.
+
 ### Guards
 
 Three things make the Stop hook a no-op:

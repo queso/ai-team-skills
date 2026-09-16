@@ -17,7 +17,10 @@
 #
 #   --user        ~/.claude/settings.json         (default; syncs with dotfiles)
 #   --local       ~/.claude/settings.local.json   (machine-local, usually gitignored)
-#   --project     <repo>/.claude/settings.json    (this repo only)
+#   --project     <repo>/.claude/settings.json    (this repo only). With
+#                 --idle-timer, also lists the timer's scratch files
+#                 (.handoff/*.draft.txt, .handoff/*.timer.pid) in that repo's
+#                 .git/info/exclude, since the draft holds typed text verbatim.
 #   --target      an explicit settings file path
 #   --idle-timer  also register the Stop-hook idle timer (opt-in: a plain
 #                 install never touches it, since auto-submitting text into a
@@ -283,3 +286,28 @@ if existed:
     print(f"  backup:  {target}.handoff-backup")
 print("Start a new session (or /clear) for it to take effect.")
 PY
+status=$?
+[ "$status" -eq 0 ] || exit "$status"
+
+# A --project install scopes the hooks to one repository, so the idle timer's
+# scratch files can be excluded in that same repository. The draft file holds
+# whatever was typed in the input box, verbatim, so it must not reach a commit
+# by accident. .git/info/exclude is used rather than .gitignore because it is
+# local to the clone and never lands in a commit itself. A --user or --local
+# install is repo-agnostic (the timer fires in whichever repo the session runs
+# in), so it writes nothing here; SKILL.md tells the user what to exclude.
+if [ "$action" = "install" ] && [ "$idle_timer" = "1" ] && [ "$mode" = "project" ] && [ "$dry_run" = "0" ]; then
+  if git_dir="$(git rev-parse --git-dir 2>/dev/null)"; then
+    exclude="$git_dir/info/exclude"
+    mkdir -p "$(dirname "$exclude")"
+    added=()
+    for pattern in '.handoff/*.draft.txt' '.handoff/*.timer.pid'; do
+      grep -qxF -- "$pattern" "$exclude" 2>/dev/null && continue
+      printf '%s\n' "$pattern" >> "$exclude"
+      added+=("$pattern")
+    done
+    if [ "${#added[@]}" -gt 0 ]; then
+      echo "handoff hook: excluded ${added[*]} in $exclude"
+    fi
+  fi
+fi
