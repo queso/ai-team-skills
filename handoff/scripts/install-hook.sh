@@ -47,7 +47,13 @@ while [ $# -gt 0 ]; do
     --idle-timer) idle_timer=1 ;;
     --dry-run) dry_run=1 ;;
     --uninstall) action=uninstall ;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)
+      # Print the header comment above: every line from line 2 up to the first
+      # line that is not a comment, with the leading "# " stripped. Reading to
+      # the first non-comment line means the range never has to be updated
+      # when the header grows or shrinks.
+      awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"
+      exit 0 ;;
     *) echo "install-hook: unknown argument '$1'" >&2; exit 2 ;;
   esac
   shift

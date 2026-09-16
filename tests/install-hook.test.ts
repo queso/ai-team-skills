@@ -209,6 +209,20 @@ describe("install-hook.sh", () => {
     expect(readFileSync(bad, "utf-8")).toBe("{ broken");
   });
 
+  // The usage text is the header comment, printed up to the first line that is
+  // not a comment. A fixed line range would drift the next time the header
+  // changed; this checks both ends of the header and that no code leaks out.
+  it("--help prints the whole header comment and nothing after it", () => {
+    const output = run(["--help"]);
+    const lines = output.trimEnd().split("\n");
+
+    expect(lines[0]).toBe("Registers handoff hooks in a Claude Code settings file: SessionStart always,");
+    expect(lines[lines.length - 1]).toBe("                With no --idle-timer, removes BOTH hooks.");
+    expect(output).toContain("--dry-run     print the resulting file to stdout, write nothing");
+    expect(lines.some((line) => line.startsWith("set -"))).toBe(false);
+    expect(lines.some((line) => line.startsWith("#"))).toBe(false);
+  });
+
   it("backs the settings file up before overwriting it", () => {
     writeFileSync(userSettings(), JSON.stringify({ model: "opus" }));
 
