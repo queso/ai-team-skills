@@ -52,6 +52,15 @@ set -uo pipefail
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 self="$here/idle-timer.sh"
 
+# TIMER_TOKEN is the ownership token of THIS process's timer claim. It is
+# assigned in exactly one place, fire_mode, from the token arm_timer passed on
+# the command line. It is deliberately global, not local to fire_mode: the
+# EXIT trap (remove_pidfile_if_ours) runs after fire_mode has returned, so a
+# local would be gone by the time the trap reads it. Nothing else may assign
+# it. Every other function in this file declares its working variables local
+# so no function can overwrite the token as a side effect.
+TIMER_TOKEN=""
+
 # ---------------------------------------------------------------------------
 # Shared helpers (used by both modes)
 # ---------------------------------------------------------------------------
@@ -68,26 +77,30 @@ file_mtime() {
 # concurrent reader never sees a half-written pidfile, and a crash mid-write
 # leaves the old file intact instead of a truncated one.
 write_pidfile() {
+  local tmp
   mkdir -p "$(dirname "$1")" 2>/dev/null
   tmp="$1.tmp.$$"
   printf '%s %s\n' "$2" "$3" > "$tmp" && mv -f "$tmp" "$1"
 }
 
 # pidfile_is_ours — true only if $pidfile exists and still names THIS
-# process ($$) with $token. Fire mode's pidfile is a claim on the lane, and
-# the claim can be taken over by a later timer at any point after it is
+# process ($$) with $TIMER_TOKEN. Fire mode's pidfile is a claim on the lane,
+# and the claim can be taken over by a later timer at any point after it is
 # written (see remove_pidfile_if_ours and arm_timer), so both places that
 # act on ownership re-read the file at the moment they act rather than
 # trusting that the write at startup still stands.
 pidfile_is_ours() {
+  local current_pid current_token
   [ -f "$pidfile" ] || return 1
   current_pid=""; current_token=""
   read -r current_pid current_token < "$pidfile" 2>/dev/null || return 1
-  [ "$current_pid" = "$$" ] && [ "$current_token" = "$token" ]
+  [ "$current_pid" = "$$" ] && [ "$current_token" = "$TIMER_TOKEN" ]
 }
 
 # remove_pidfile_if_ours — deletes $pidfile only if it still names THIS
-# process ($$) and $token. Used as the fire-mode EXIT trap instead of a bare
+# process ($$) and $TIMER_TOKEN. Both are globals set by fire_mode: this
+# runs as the EXIT trap, after fire_mode has returned, so it can only read
+# script-scope state. Used as the fire-mode EXIT trap instead of a bare
 # `rm -f`, because a cancelling Stop hook's `kill -TERM` returns immediately
 # without waiting for the signal to actually be delivered and processed. In
 # the window between that `kill` and this process really exiting, the same
@@ -109,6 +122,7 @@ remove_pidfile_if_ours() {
 # proof that the live process at that pid is actually the timer we armed, not
 # a stranger that happens to have inherited the number.
 pid_is_ours() {
+  local pid token
   pid="$1"; token="$2"
   [ -n "$pid" ] && [ -n "$token" ] || return 1
   case "$pid" in
@@ -136,6 +150,7 @@ pid_is_ours() {
 # a missing, empty, or corrupt pidfile without failing the hook: a stale
 # pidfile is a nuisance, not a reason to stop arming future timers.
 cancel_existing_timer() {
+  local old_pid old_token
   [ -f "$pidfile" ] || return 0
   old_pid=""; old_token=""
   read -r old_pid old_token < "$pidfile" 2>/dev/null || true
@@ -164,12 +179,13 @@ pane_exists() {
   esac
 }
 
-# write_draft_file <content> — atomic write of $draft (temp file + rename),
+# write_draft_file <path> <content> — atomic write (temp file + rename),
 # shared by both salvage_draft outcomes below.
 write_draft_file() {
-  mkdir -p "$(dirname "$draft")" 2>/dev/null
-  tmp="$draft.tmp.$$"
-  printf '%s\n' "$1" > "$tmp" && mv -f "$tmp" "$draft"
+  local tmp
+  mkdir -p "$(dirname "$1")" 2>/dev/null
+  tmp="$1.tmp.$$"
+  printf '%s\n' "$2" > "$tmp" && mv -f "$tmp" "$1"
 }
 
 # Claude Code's input line begins with U+276F (❯) followed immediately by a
@@ -191,6 +207,7 @@ input_marker="❯${nbsp}"
 # only the marker's own trailing NBSP would otherwise look non-empty and get
 # salvaged as if it were a real draft.
 is_blank() {
+  local stripped
   stripped="${1//$nbsp/}"
   [ -z "$(printf '%s' "$stripped" | tr -d '[:space:]')" ]
 }
@@ -277,6 +294,7 @@ is_box_rule() {
 # try: salvaging a ghost hint as if it were a real draft is a harmless false
 # positive, not the failure mode this function exists to prevent.
 salvage_draft() {
+  local draft captured box box_rows in_box box_closed row cut cut_rows
   draft="$root/.handoff/$lane.draft.txt"
   captured=""
   case "$pane_kind" in
@@ -316,7 +334,7 @@ salvage_draft() {
     # A blank box is the common case for a timer that actually fires: the
     # session sat idle with nothing typed. Nothing to salvage — leave no
     # file rather than one that looks like a draft but isn't.
-    is_blank "$box" || write_draft_file "$box"
+    is_blank "$box" || write_draft_file "$draft" "$box"
     # More than one row means a multi-line draft: salvaged in full above,
     # but not safe to clear with a single C-u. See the header comment.
     [ "$box_rows" -eq 1 ] || return 1
@@ -330,7 +348,7 @@ salvage_draft() {
   # isolated cleanly. A blank capture gets no file. Either way, return 1 so
   # fire_mode stops here instead of sending keys into whatever is on screen.
   is_blank "$captured" ||
-    write_draft_file "$(printf '# idle-timer: could not find the input-line marker; this is the full pane capture as a fallback.\n%s' "$captured")"
+    write_draft_file "$draft" "$(printf '# idle-timer: could not find the input-line marker; this is the full pane capture as a fallback.\n%s' "$captured")"
   return 1
 }
 
@@ -404,6 +422,10 @@ submit_handoff() {
 # `nohup` is layered on in both branches so the timer also survives a SIGHUP
 # if its session's controlling terminal goes away before it fires.
 arm_timer() {
+  # Generated here, handed to the fire-mode process on its command line, and
+  # never used again in this process: Stop hook mode has no timer claim of
+  # its own, so this is a local, not TIMER_TOKEN.
+  local token
   token="$(date +%s%N 2>/dev/null || date +%s)-$$-$RANDOM"
   if command -v setsid >/dev/null 2>&1; then
     setsid nohup bash "$self" --fire "$token" "$lane" "$root" "$pane_kind" "$pane_target" "$snapshot" "$idle_seconds" >/dev/null 2>&1 </dev/null &
@@ -417,7 +439,14 @@ arm_timer() {
 #                            <pane_target> <snapshot_mtime> <idle_seconds>`
 # ---------------------------------------------------------------------------
 fire_mode() {
-  token="$1"; lane="$2"; root="$3"; pane_kind="$4"
+  local progress current
+  # Deliberately NOT local: TIMER_TOKEN and pidfile are read by the EXIT
+  # trap after this function has returned (see the TIMER_TOKEN comment at
+  # the top of the file), and lane, root, pane_kind, pane_target, snapshot
+  # and idle_seconds are the same script-scope state the shared helpers
+  # (pane_exists, salvage_draft, clear_input, submit_handoff) read in Stop
+  # hook mode. This is the one assignment of TIMER_TOKEN in the file.
+  TIMER_TOKEN="$1"; lane="$2"; root="$3"; pane_kind="$4"
   pane_target="$5"; snapshot="$6"; idle_seconds="$7"
 
   pidfile="$root/.handoff/$lane.timer.pid"
@@ -428,7 +457,7 @@ fire_mode() {
   # depend on remembering to call rm on each of those paths individually.
   # It is conditional (remove_pidfile_if_ours), not a bare `rm -f` — see
   # that function for the replacement-clobbering race a bare rm would open.
-  write_pidfile "$pidfile" "$$" "$token"
+  write_pidfile "$pidfile" "$$" "$TIMER_TOKEN"
   trap remove_pidfile_if_ours EXIT
 
   # HANDOFF_IDLE_TIMER is not re-checked here. Stop hook mode exits before
