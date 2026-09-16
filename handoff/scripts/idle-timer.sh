@@ -431,10 +431,11 @@ fire_mode() {
   write_pidfile "$pidfile" "$$" "$token"
   trap remove_pidfile_if_ours EXIT
 
-  # HANDOFF_IDLE_TIMER can be flipped off after this timer was already
-  # armed; honor that immediately rather than sleeping out a window that is
-  # now moot.
-  [ "${HANDOFF_IDLE_TIMER:-1}" = "0" ] && exit 0
+  # HANDOFF_IDLE_TIMER is not re-checked here. Stop hook mode exits before
+  # arm_timer when it is 0, so this process only ever inherits a non-zero
+  # value, and a running process cannot see later changes to the caller's
+  # environment. Turning the timer off after arming is handled by the next
+  # Stop hook, which cancels the pending timer before checking the switch.
 
   # This script runs without -e, so a failing sleep (an interval that is
   # not a number, for one) would otherwise fall straight through to the
