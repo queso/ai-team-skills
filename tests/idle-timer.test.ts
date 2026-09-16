@@ -615,4 +615,44 @@ describe("idle-timer.sh fire mode pidfile ownership", () => {
     // than deleting the file out from under it.
     expect(readFileSync(pidfilePath(lane), "utf-8").trim()).toBe("999999 other-token");
   });
+
+  it("exits without sending keys when it wakes and the pidfile names another timer", async () => {
+    // Two Stop hooks fired close together each arm a timer before either
+    // has written its pidfile; both are live, one pid is recorded, and the
+    // other is an orphan no later Stop hook can cancel. Fire mode closes
+    // that gap by re-reading the pidfile after the sleep and exiting unless
+    // it still names this process. Modeled directly: start a real fire-mode
+    // timer, let it record itself, overwrite the pidfile with a foreign pid
+    // while it sleeps, and check that it wakes, sends nothing, and leaves
+    // the foreign pidfile alone. The pane shows a clean input line, so the
+    // ownership gate is the only thing that can stop the injection.
+    writeFileSync(tmuxCapture, `some previous turn's output\n${INPUT_MARKER}`);
+
+    const lane = "orphan";
+    const child = spawn("bash", [SCRIPT, "--fire", "orphan-token", lane, repo, "tmux", "%1", "", "1"], {
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        TMUX_STUB_LOG: tmuxLog,
+        TMUX_STUB_PANES: tmuxPanes,
+        TMUX_STUB_CAPTURE: tmuxCapture,
+        TMUX_STUB_CAPTURE_JOINED: tmuxCaptureJoined,
+      },
+    });
+    plainProcesses.push(child);
+    if (!child.pid) throw new Error("failed to spawn fire-mode process");
+    const armedPid = child.pid;
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+
+    expect(waitFor(() => readPidfile(lane)?.pid === armedPid)).toBe(true);
+
+    writeFileSync(pidfilePath(lane), "999999 other-token\n");
+
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
+
+    expect(isAlive(armedPid)).toBe(false);
+    expect(readFileSync(tmuxLog, "utf-8")).not.toContain("send-keys");
+    expect(readFileSync(pidfilePath(lane), "utf-8").trim()).toBe("999999 other-token");
+  });
 });

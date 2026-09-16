@@ -73,6 +73,19 @@ write_pidfile() {
   printf '%s %s\n' "$2" "$3" > "$tmp" && mv -f "$tmp" "$1"
 }
 
+# pidfile_is_ours — true only if $pidfile exists and still names THIS
+# process ($$) with $token. Fire mode's pidfile is a claim on the lane, and
+# the claim can be taken over by a later timer at any point after it is
+# written (see remove_pidfile_if_ours and arm_timer), so both places that
+# act on ownership re-read the file at the moment they act rather than
+# trusting that the write at startup still stands.
+pidfile_is_ours() {
+  [ -f "$pidfile" ] || return 1
+  current_pid=""; current_token=""
+  read -r current_pid current_token < "$pidfile" 2>/dev/null || return 1
+  [ "$current_pid" = "$$" ] && [ "$current_token" = "$token" ]
+}
+
 # remove_pidfile_if_ours — deletes $pidfile only if it still names THIS
 # process ($$) and $token. Used as the fire-mode EXIT trap instead of a bare
 # `rm -f`, because a cancelling Stop hook's `kill -TERM` returns immediately
@@ -85,12 +98,8 @@ write_pidfile() {
 # is a normal SIGTERM-delivery delay, not an exotic race, so the check has to
 # hold every time, not just usually.
 remove_pidfile_if_ours() {
-  [ -f "$pidfile" ] || return 0
-  current_pid=""; current_token=""
-  read -r current_pid current_token < "$pidfile" 2>/dev/null || return 0
-  if [ "$current_pid" = "$$" ] && [ "$current_token" = "$token" ]; then
-    rm -f "$pidfile"
-  fi
+  pidfile_is_ours && rm -f "$pidfile"
+  return 0
 }
 
 # pid_is_ours <pid> <token> — true only if <pid> is a live process whose own
@@ -364,6 +373,18 @@ submit_handoff() {
 # it does in fire mode, which is unambiguous no matter how many forks or
 # execs happened on the way there.
 #
+# That leaves a window between this function returning and the detached
+# process writing its pidfile. Two Stop hooks fired close together (two
+# turns ending back to back, or a Stop hook running while the previous one
+# is still arming) each see no pidfile to cancel and each spawn a timer. Both
+# timers are live, but only the second write survives, so the first is
+# recorded nowhere and no later Stop hook can cancel it. This function does
+# not try to close that window. Fire mode closes it instead: after the sleep,
+# a timer re-reads the pidfile and exits unless the file still names its own
+# pid and token. The timer that won the pidfile is the only one that can
+# inject; the other one wakes, finds it does not own the file, and exits
+# without touching the pane.
+#
 # Detaching itself has to be portable: macOS ships no setsid(1), so this
 # skill cannot depend on it existing. Where it does exist it is preferred
 # (it also detaches from the controlling terminal, not just the process
@@ -412,6 +433,12 @@ fire_mode() {
   # hook mode validates the interval before arming, but this process also
   # has to defend itself: never inject unless the wait actually happened.
   sleep "$idle_seconds" || exit 0
+
+  # Ownership gate: exit unless the pidfile still names this process. An
+  # orphaned timer (two Stop hooks armed at once, see arm_timer) never owns
+  # the file, so it stops here. The EXIT trap is conditional on the same
+  # check, so a foreign pidfile is left in place for whoever does own it.
+  pidfile_is_ours || exit 0
 
   # Re-verify before acting: a Stop hook does not fire on an interrupted
   # turn, so everything above could be stale by the time we wake up — the
