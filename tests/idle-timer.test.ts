@@ -29,7 +29,14 @@ let tmuxLog: string;
 let tmuxPanes: string;
 let tmuxCapture: string;
 let tmuxCaptureJoined: string;
+let herdrLog: string;
+let herdrPanes: string;
+let herdrCapture: string;
 let bigTranscript: string;
+
+// The herdr pane id the herdr tests use. Not a tmux-style "%1", so a call
+// that lands on the wrong stub is visible in the argv it logs.
+const HERDR_PANE = "pane-a1b2";
 
 // Timer processes armed by a test (idle-timer.sh --fire, its own process
 // group leader) get killed as a group. A plain dummy process used only to
@@ -93,9 +100,17 @@ function run(payload: Record<string, unknown>, env: Record<string, string> = {})
       TMUX_STUB_PANES: tmuxPanes,
       TMUX_STUB_CAPTURE: tmuxCapture,
       TMUX_STUB_CAPTURE_JOINED: tmuxCaptureJoined,
+      HERDR_STUB_LOG: herdrLog,
+      HERDR_STUB_PANES: herdrPanes,
+      HERDR_STUB_CAPTURE: herdrCapture,
       ...env,
     },
   });
+}
+
+/** Env for a Stop hook turn in a herdr pane: HERDR_PANE_ID set, TMUX_PANE not. */
+function herdrEnv(extra: Record<string, string> = {}) {
+  return { HANDOFF_LANE: "main", HERDR_PANE_ID: HERDR_PANE, HANDOFF_IDLE_SECONDS: "1", ...extra };
 }
 
 function stopPayload(overrides: Record<string, unknown> = {}) {
@@ -125,7 +140,8 @@ beforeEach(() => {
   // that by serving TMUX_STUB_CAPTURE_JOINED (when a test has written one)
   // for a -J call and the raw, row-per-wrap TMUX_STUB_CAPTURE otherwise, so
   // a script that forgets the flag sees the wrapped form real tmux would
-  // give it.
+  // give it. A send-keys call exits with TMUX_STUB_SENDKEYS_EXIT (default
+  // 0) so a test can make the clear fail and check nothing is sent after it.
   writeFileSync(
     tmuxStub,
     `#!/usr/bin/env bash
@@ -141,11 +157,35 @@ case "$1" in
       cat "$TMUX_STUB_CAPTURE" 2>/dev/null
     fi
     ;;
+  send-keys) exit "\${TMUX_STUB_SENDKEYS_EXIT:-0}" ;;
 esac
 exit 0
 `,
   );
   chmodSync(tmuxStub, 0o755);
+
+  // The herdr stub mirrors the tmux one. Nobody has run the herdr path
+  // against a real herdr pane, so this stub is not a model of herdr's
+  // behavior; it pins the argv the script emits for each of the four
+  // subcommands it uses, and answers the two read commands from files the
+  // test controls: `pane get <id>` exits 0 only if <id> is listed in
+  // HERDR_STUB_PANES, `pane read` serves HERDR_STUB_CAPTURE verbatim (herdr
+  // has no documented -J, so there is no joined form), `pane send-keys`
+  // exits with HERDR_STUB_SENDKEYS_EXIT (default 0), and `pane run` exits 0.
+  const herdrStub = join(bin, "herdr");
+  writeFileSync(
+    herdrStub,
+    `#!/usr/bin/env bash
+echo "$@" >> "$HERDR_STUB_LOG"
+case "$1 $2" in
+  "pane get") grep -qx -- "$3" "$HERDR_STUB_PANES" 2>/dev/null; exit $? ;;
+  "pane read") cat "$HERDR_STUB_CAPTURE" 2>/dev/null ;;
+  "pane send-keys") exit "\${HERDR_STUB_SENDKEYS_EXIT:-0}" ;;
+esac
+exit 0
+`,
+  );
+  chmodSync(herdrStub, 0o755);
 
   const state = mkdtempSync(join(tmpdir(), "handoff-idle-timer-state-"));
   tmuxLog = join(state, "tmux.log");
@@ -156,6 +196,13 @@ exit 0
   writeFileSync(tmuxPanes, "%1\n");
   writeFileSync(tmuxCapture, "");
   writeFileSync(tmuxCaptureJoined, "");
+
+  herdrLog = join(state, "herdr.log");
+  herdrPanes = join(state, "herdr-panes.txt");
+  herdrCapture = join(state, "herdr-capture.txt");
+  writeFileSync(herdrLog, "");
+  writeFileSync(herdrPanes, `${HERDR_PANE}\n`);
+  writeFileSync(herdrCapture, "");
 
   bigTranscript = join(state, "transcript.jsonl");
   writeFileSync(bigTranscript, "x".repeat(3000));
@@ -541,6 +588,33 @@ describe("idle-timer.sh fire mode", () => {
     expect(draft).not.toContain("some earlier scrollback message");
   });
 
+  it("does not submit /handoff when the C-u clear fails", () => {
+    // The clear and the submit are separate send-keys calls. If the first
+    // one fails, the box still holds whatever was typed, and /handoff sent
+    // after it would concatenate with that text and submit as prose. The
+    // draft is salvaged either way; the submit must not follow.
+    writeFileSync(tmuxCapture, `some pane chrome\n${INPUT_MARKER}half-typed draft text`);
+
+    run(stopPayload(), {
+      HANDOFF_LANE: "main",
+      TMUX_PANE: "%1",
+      TMUX: "fake",
+      HANDOFF_IDLE_SECONDS: "1",
+      TMUX_STUB_SENDKEYS_EXIT: "1",
+    });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("C-u"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
+    expect(calls.some((c) => c.includes("send-keys") && c.includes("C-u"))).toBe(true);
+    expect(calls.some((c) => c.includes("/handoff"))).toBe(false);
+    expect(readFileSync(draftPath("main"), "utf-8").trim()).toBe("half-typed draft text");
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+  });
+
   it("does not inject when the pane is gone by fire time", () => {
     writeFileSync(tmuxPanes, ""); // no panes exist
 
@@ -571,6 +645,127 @@ describe("idle-timer.sh fire mode", () => {
     const log = readFileSync(tmuxLog, "utf-8");
     expect(log).not.toContain("/handoff");
     expect(existsSync(pidfilePath("main"))).toBe(false);
+  });
+});
+
+describe("idle-timer.sh herdr path", () => {
+  // Every call below goes to the herdr stub, which has never been checked
+  // against a real herdr pane. These tests pin what the script emits, so a
+  // change to any of the four subcommands is a visible diff here rather
+  // than a silent change in an unverified path.
+
+  it("arms when HERDR_PANE_ID is set and TMUX_PANE is not", () => {
+    run(stopPayload(), herdrEnv({ HANDOFF_IDLE_SECONDS: "100" }));
+
+    expect(waitFor(() => readPidfile("main") !== null)).toBe(true);
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(entry?.pid).toBeGreaterThan(0);
+    expect(isAlive(entry?.pid ?? -1)).toBe(true);
+    // The Stop hook never touches herdr itself; only fire mode does.
+    expect(readFileSync(herdrLog, "utf-8")).toBe("");
+    expect(readFileSync(tmuxLog, "utf-8")).toBe("");
+  });
+
+  it("emits exactly pane get, pane read, pane send-keys ctrl+u, pane run /handoff, in that order", () => {
+    writeFileSync(
+      herdrCapture,
+      `some previous turn's output\n────────────\n${INPUT_MARKER}\n────────────\n  status line`,
+    );
+
+    run(stopPayload(), herdrEnv());
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(herdrLog, "utf-8").includes("/handoff"), 5000)).toBe(true);
+    Bun.sleepSync(200);
+
+    const calls = readFileSync(herdrLog, "utf-8").trim().split("\n");
+    expect(calls).toEqual([
+      `pane get ${HERDR_PANE}`,
+      `pane read ${HERDR_PANE} --source visible`,
+      `pane send-keys ${HERDR_PANE} ctrl+u`,
+      `pane run ${HERDR_PANE} /handoff`,
+    ]);
+    // Nothing leaks across to the tmux path.
+    expect(readFileSync(tmuxLog, "utf-8")).toBe("");
+    expect(existsSync(draftPath("main"))).toBe(false);
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+  });
+
+  it("salvages a one-line draft from pane read before clearing it", () => {
+    writeFileSync(
+      herdrCapture,
+      `chrome\n────────────\n${INPUT_MARKER}half-typed herdr draft\n────────────\n  status line`,
+    );
+
+    run(stopPayload(), herdrEnv());
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(herdrLog, "utf-8").includes("/handoff"), 5000)).toBe(true);
+
+    expect(readFileSync(draftPath("main"), "utf-8")).toBe("half-typed herdr draft\n");
+    const calls = readFileSync(herdrLog, "utf-8").trim().split("\n");
+    expect(calls.indexOf(`pane send-keys ${HERDR_PANE} ctrl+u`)).toBeLessThan(
+      calls.indexOf(`pane run ${HERDR_PANE} /handoff`),
+    );
+  });
+
+  it("does not call pane run when pane send-keys exits non-zero", () => {
+    // The asymmetric failure the gate exists for: if `pane send-keys` is
+    // the wrong subcommand but `pane run` is right, the box is never
+    // cleared and /handoff lands on top of the typed text. A failing clear
+    // has to stop the fire there.
+    writeFileSync(herdrCapture, `chrome\n${INPUT_MARKER}half-typed herdr draft`);
+
+    run(stopPayload(), herdrEnv({ HERDR_STUB_SENDKEYS_EXIT: "1" }));
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(herdrLog, "utf-8").includes("send-keys"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    const calls = readFileSync(herdrLog, "utf-8").trim().split("\n");
+    expect(calls).toEqual([
+      `pane get ${HERDR_PANE}`,
+      `pane read ${HERDR_PANE} --source visible`,
+      `pane send-keys ${HERDR_PANE} ctrl+u`,
+    ]);
+    expect(readFileSync(draftPath("main"), "utf-8").trim()).toBe("half-typed herdr draft");
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+  });
+
+  it("does not inject when pane get reports the herdr pane gone by fire time", () => {
+    writeFileSync(herdrPanes, "");
+    writeFileSync(herdrCapture, `chrome\n${INPUT_MARKER}`);
+
+    run(stopPayload(), herdrEnv());
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(herdrLog, "utf-8").includes("pane get"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    expect(readFileSync(herdrLog, "utf-8").trim().split("\n")).toEqual([`pane get ${HERDR_PANE}`]);
+    expect(existsSync(pidfilePath("main"))).toBe(false);
+  });
+
+  it("sends no keys when the marker is absent from the herdr capture", () => {
+    writeFileSync(herdrCapture, "Do you want to proceed?\n❯ 1. Yes\n  2. No");
+
+    run(stopPayload(), herdrEnv());
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(herdrLog, "utf-8").includes("pane read"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    const log = readFileSync(herdrLog, "utf-8");
+    expect(log).not.toContain("send-keys");
+    expect(log).not.toContain("pane run");
+    expect(readFileSync(draftPath("main"), "utf-8")).toContain("could not find the input-line marker");
   });
 });
 

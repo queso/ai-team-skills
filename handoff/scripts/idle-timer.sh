@@ -338,6 +338,15 @@ salvage_draft() {
 # half-typed user input left in the box concatenates with an injected
 # `/handoff`, submits as prose, and silently produces no handoff — this is
 # the failure mode the whole salvage-then-clear sequence exists to avoid.
+#
+# Its exit status is the last gate before submit_handoff: fire_mode stops
+# if this returns non-zero. The herdr path in particular is unverified (see
+# submit_handoff), and its four subcommands do not fail uniformly. If `pane
+# get` or `pane read` is wrong the timer never fires, which is safe. If
+# `pane send-keys` is wrong while `pane run` works, the box is never cleared
+# and the injection lands on top of whatever was typed: the exact failure
+# the clear exists to prevent. So a clear that reports failure means no
+# submit, on both paths.
 clear_input() {
   case "$pane_kind" in
     tmux)  tmux send-keys -t "$pane_target" C-u ;;
@@ -460,7 +469,10 @@ fire_mode() {
   # the box, and Enter would submit the leftovers plus /handoff as prose.
   # Either way, exit without touching the pane at all.
   salvage_draft || exit 0
-  clear_input
+  # A clear that fails is one more reason not to submit: the draft is
+  # already salvaged, and sending /handoff into an uncleared box would
+  # concatenate it with the typed text. See clear_input.
+  clear_input || exit 0
   submit_handoff
 }
 

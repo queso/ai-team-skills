@@ -292,7 +292,7 @@ Three things make the Stop hook a no-op:
 
 ### The herdr path is unverified
 
-The tmux injection (`tmux send-keys`) was confirmed end to end against a live session. The herdr equivalent (`herdr pane run`) is implemented by analogy to the same one-call send-and-submit shape, but has not been run against a real herdr pane the way the tmux path has — treat it as best-effort until someone confirms it.
+The tmux injection (`tmux send-keys`) was confirmed end to end against a live session. The herdr path uses four subcommands, none of which has been run against a real herdr pane the way the tmux path has: `herdr pane get <id>` to check the pane still exists, `herdr pane read <id> --source visible` to capture the input box for the draft salvage, `herdr pane send-keys <id> ctrl+u` to clear the box, and `herdr pane run <id> /handoff` to submit, by analogy to the same one-call send-and-submit shape as the tmux command. Treat it as best-effort until someone confirms it. The failure modes are ordered so a wrong guess fails closed: if `pane get` or `pane read` is wrong the timer never fires, and if `pane send-keys` exits non-zero the timer stops there and never calls `pane run`, so the injection cannot land on top of an uncleared box. The tests pin the exact argv of all four calls against a stub, which verifies what the script emits, not what herdr accepts.
 
 ### Environment variables
 
