@@ -47,6 +47,21 @@
 #                                  lane resolution, delegated to lane.sh —
 #                                  see there for why HERDR_PANE_ID and not
 #                                  HERDR_WORKSPACE_ID
+#
+# Output discipline: nothing in this file writes to stdout, and the Stop hook
+# path always exits 0. Claude Code treats a Stop hook's stdout as a control
+# channel, not a log: output that starts with `{` and ends with `}` is parsed
+# as JSON, and on Stop a `decision: "block"` in it keeps the session from
+# ending. Plain text on exit 0 goes only to the debug log (the hooks
+# reference lists UserPromptSubmit, UserPromptExpansion, SessionStart and
+# PostModelSwitch as the events whose stdout becomes model context; Stop is
+# not among them), so stdout is useless as a diagnostic channel and risky as
+# a control one. Exit 2 blocks Claude from stopping, with stderr as the
+# reason, so a broken configuration is reported on stderr with exit 0 and
+# never with a non-zero status. Every command substitution below captures
+# its own stdout, the three diagnostics go to stderr, and arm_timer sends
+# both of the detached fire-mode child's streams to /dev/null. Checked
+# against code.claude.com/docs/en/hooks in 2026-09.
 set -uo pipefail
 
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -545,13 +560,19 @@ else
   exit 0
 fi
 
-# Subagent turns share the parent session's transcript but not its pane.
-# Arming or cancelling the lane's timer on their behalf would race the real
-# turns happening in that same pane — a subagent finishing has nothing to do
-# with whether the human at the pane has gone idle. The Stop payload only
-# carries a non-empty agent_id for subagent invocations, never for the main
-# session, so this is the one check that has to run before lane resolution
-# and before the cancel step, not just before arming.
+# Subagent guard. The hooks reference (code.claude.com/docs/en/hooks, read
+# 2026-09) says settings-file hooks also run inside subagents, and that
+# agent_id is a common input field "present only when the hook fires inside
+# a subagent call". It also says a subagent finishing fires SubagentStop, a
+# separate event this hook is not registered for, and its examples of hooks
+# firing inside a subagent are PreToolUse and PostToolUse; it never says Stop
+# fires there. So this check may never see a non-empty agent_id. It stays
+# because it costs one string test and the failure it prevents is real: a
+# subagent shares the parent session's transcript but not its pane, so
+# arming or cancelling this lane's timer on its behalf would race the turns
+# happening in that pane. A subagent finishing says nothing about whether
+# the human at the pane has gone idle. It runs before lane resolution and
+# before the cancel step, not just before arming.
 [ -z "${agent_id:-}" ] || exit 0
 
 lane="$(bash "$here/lane.sh")"
