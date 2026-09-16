@@ -212,6 +212,16 @@ is_blank() {
 # We take the LAST such line, since the live input line is what's rendered
 # at the bottom of a multi-line capture.
 #
+# Return value doubles as the go/no-go signal for injection: 0 means the
+# input line was found and it is safe to clear and submit into it; 1 means
+# no marker was found, and fire_mode must not send any keys. The marker's
+# absence is this script's own evidence that the pane is not showing the
+# Claude Code input box. The likeliest thing an hour-idle session is showing
+# instead is a pending permission or plan-approval dialog: Stop does not fire
+# for a turn blocked on a dialog, so the timer armed by the previous turn
+# stays live, and sending C-u then Enter into that dialog would select
+# whichever option is highlighted. No marker means no injection.
+#
 # A Claude Code auto-suggested "ghost" hint renders indistinguishably from
 # real typed text after the marker (confirmed in the same probe), and there
 # is no reliable way to tell them apart from a plain-text capture. We do not
@@ -241,13 +251,15 @@ salvage_draft() {
     return 0
   fi
 
-  # Marker not found at all — an unexpected pane layout, a UI change this
-  # script doesn't know about. Fall back to the old full-capture behavior
+  # Marker not found at all: a pending dialog, an unexpected pane layout, a
+  # UI change this script doesn't know about. Keep the full-capture fallback
   # rather than silently losing a possible draft, but label it clearly so a
   # reader opening the file knows it is scrollback-and-all, not their draft
-  # isolated cleanly.
+  # isolated cleanly. A blank capture gets no file. Either way, return 1 so
+  # fire_mode stops here instead of sending keys into whatever is on screen.
   is_blank "$captured" ||
     write_draft_file "$(printf '# idle-timer: could not find the input-line marker; this is the full pane capture as a fallback.\n%s' "$captured")"
+  return 1
 }
 
 # clear_input — sent as its own call, before the injected command. Real
@@ -345,7 +357,12 @@ fire_mode() {
   current="$(file_mtime "$progress")"
   [ "$current" = "$snapshot" ] || exit 0
 
-  salvage_draft
+  # salvage_draft returns non-zero when it cannot find the input-line marker.
+  # That is the last gate before sending keys: the pane may be sitting on a
+  # permission or plan-approval dialog, and Enter there selects the
+  # highlighted option. No marker means no injection, so exit without
+  # touching the pane at all.
+  salvage_draft || exit 0
   clear_input
   submit_handoff
 }

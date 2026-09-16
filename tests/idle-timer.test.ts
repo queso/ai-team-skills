@@ -332,7 +332,33 @@ describe("idle-timer.sh fire mode", () => {
     expect(existsSync(draftPath("main"))).toBe(false);
   });
 
-  it("falls back to a labeled full-pane capture when the input-line marker cannot be found", () => {
+  it("sends no keys at all when the input-line marker is absent (a pending dialog, for example)", () => {
+    // Stop does not fire for a turn blocked on a permission or plan-approval
+    // dialog, so the previous turn's timer stays armed and wakes up with the
+    // dialog on screen. C-u then Enter into that dialog would select the
+    // highlighted option. The marker's absence is the only evidence the
+    // script has that the input box is not showing, and it must treat that
+    // as a hard stop: no send-keys of any kind, not just no /handoff.
+    writeFileSync(
+      tmuxCapture,
+      "Bash command\n\n  rm -rf build/\n\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again\n  3. No",
+    );
+
+    run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    // The capture-pane call proves the timer woke up and reached
+    // salvage_draft; anything it was going to send would follow right after.
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("capture-pane"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
+    expect(calls.some((c) => c.includes("send-keys"))).toBe(false);
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+  });
+
+  it("still writes the labeled full-pane fallback draft when the marker is absent but text is visible", () => {
     writeFileSync(tmuxCapture, "an unexpected pane layout with no prompt marker present anywhere");
 
     run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
@@ -343,6 +369,24 @@ describe("idle-timer.sh fire mode", () => {
     const draft = readFileSync(draftPath("main"), "utf-8");
     expect(draft).toContain("could not find the input-line marker");
     expect(draft).toContain("an unexpected pane layout with no prompt marker present anywhere");
+
+    // Writing the fallback draft is not permission to inject.
+    Bun.sleepSync(300);
+    expect(readFileSync(tmuxLog, "utf-8")).not.toContain("send-keys");
+  });
+
+  it("writes no draft and sends no keys when the marker is absent and the capture is blank", () => {
+    writeFileSync(tmuxCapture, "\n   \n\n");
+
+    run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", HANDOFF_IDLE_SECONDS: "1" });
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("capture-pane"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    expect(existsSync(draftPath("main"))).toBe(false);
+    expect(readFileSync(tmuxLog, "utf-8")).not.toContain("send-keys");
   });
 
   it("does not mistake a scrollback line's ASCII-space lookalike for the real NBSP input line", () => {
