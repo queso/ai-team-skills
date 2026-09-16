@@ -271,7 +271,7 @@ It is opt-in on purpose: auto-submitting text into a session someone is actively
 - `/handoff install --idle-timer` registers both the timer and the `SessionStart` reload hook.
 - `/handoff install --uninstall --idle-timer` removes only the timer, leaving the reload hook in place.
 - `/handoff install --uninstall` (no `--idle-timer`) removes both.
-- `HANDOFF_IDLE_TIMER=0` disables the timer at runtime without touching the installed hook. Any timer already armed is still cancelled by the next turn's Stop hook; the runtime switch just stops a new one from replacing it.
+- `HANDOFF_IDLE_TIMER=0` disables the timer without touching the installed hook. Set it in the `env` block of Claude Code's `settings.json`, or export it before launching Claude Code; hooks inherit the environment Claude Code was launched with, so exporting it in a shell during a session has no effect. Any timer already armed is still cancelled by the next turn's Stop hook; the switch just stops a new one from replacing it.
 
 ### What it writes
 
@@ -298,6 +298,6 @@ The tmux injection (`tmux send-keys`) was confirmed end to end against a live se
 
 - `HANDOFF_IDLE_MINUTES` (default `58`) — idle window before firing
 - `HANDOFF_IDLE_SECONDS` — overrides `HANDOFF_IDLE_MINUTES` in raw seconds, for tests that should not sleep for real minutes
-- `HANDOFF_IDLE_TIMER=0` — disable arming at runtime without uninstalling
+- `HANDOFF_IDLE_TIMER=0` — disable arming without uninstalling (set in the `settings.json` `env` block or before launching Claude Code; a mid-session shell export does not reach the hook)
 - `HANDOFF_IDLE_MIN_BYTES` (default `2000`) — transcript-size floor below which nothing arms
 - `HANDOFF_IDLE_COOLDOWN_SECONDS` (default `120`) — skip re-arming this soon after a fresh `.handoff/<lane>.md` write
