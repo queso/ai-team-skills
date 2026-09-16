@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { REPO_ROOT } from "./helpers";
@@ -126,6 +135,47 @@ function arm(lane: string, env: Record<string, string> = {}) {
   return entry;
 }
 
+/**
+ * A PATH with no tmux on it. Leaving the stub out of `bin` is not enough:
+ * this runner's own PATH reaches a real tmux, so the directory holds
+ * symlinks to just the tools idle-timer.sh and lane.sh call, resolved from
+ * the runner's PATH, and is used as the entire PATH. Tools missing on this
+ * platform (setsid on macOS) are skipped, as the script itself tolerates.
+ */
+function pathWithoutTmux(): string {
+  const dir = mkdtempSync(join(bin, "notmux-"));
+  const tools = [
+    "bash",
+    "git",
+    "jq",
+    "python3",
+    "cat",
+    "wc",
+    "tr",
+    "stat",
+    "date",
+    "dirname",
+    "mkdir",
+    "mv",
+    "rm",
+    "grep",
+    "sleep",
+    "setsid",
+    "nohup",
+    "ps",
+  ];
+  for (const tool of tools) {
+    let resolved = "";
+    try {
+      resolved = execFileSync("which", [tool], { encoding: "utf-8" }).trim();
+    } catch {
+      continue;
+    }
+    if (resolved) symlinkSync(resolved, join(dir, tool));
+  }
+  return dir;
+}
+
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), "handoff-idle-timer-repo-"));
   execFileSync("git", ["init", "-q"], { cwd: repo });
@@ -140,12 +190,15 @@ beforeEach(() => {
   // that by serving TMUX_STUB_CAPTURE_JOINED (when a test has written one)
   // for a -J call and the raw, row-per-wrap TMUX_STUB_CAPTURE otherwise, so
   // a script that forgets the flag sees the wrapped form real tmux would
-  // give it. A send-keys call exits with TMUX_STUB_SENDKEYS_EXIT (default
-  // 0) so a test can make the clear fail and check nothing is sent after it.
+  // give it. TMUX_STUB_FAIL names one subcommand (send-keys, capture-pane,
+  // list-panes) that exits 1 with no output after being logged, the way
+  // real tmux fails on a pane that no longer exists, so a test can break
+  // exactly one step of the fire sequence and check what follows it.
   writeFileSync(
     tmuxStub,
     `#!/usr/bin/env bash
 echo "$@" >> "$TMUX_STUB_LOG"
+[ "$1" = "\${TMUX_STUB_FAIL:-}" ] && exit 1
 case "$1" in
   list-panes) cat "$TMUX_STUB_PANES" 2>/dev/null ;;
   capture-pane)
@@ -157,7 +210,6 @@ case "$1" in
       cat "$TMUX_STUB_CAPTURE" 2>/dev/null
     fi
     ;;
-  send-keys) exit "\${TMUX_STUB_SENDKEYS_EXIT:-0}" ;;
 esac
 exit 0
 `,
@@ -247,6 +299,31 @@ describe("idle-timer.sh Stop hook mode", () => {
     run(stopPayload(), { HANDOFF_LANE: "main", HANDOFF_IDLE_SECONDS: "100" });
 
     expect(existsSync(pidfilePath("main"))).toBe(false);
+  });
+
+  it("exits 0 with no tmux binary on PATH, and the timer it arms exits at fire time leaving nothing behind", () => {
+    // TMUX_PANE is set (the pane is real) but no tmux binary is reachable,
+    // as when a hook runs with a stripped-down PATH. The Stop hook does not
+    // check for the binary, so it still arms; what has to hold is that the
+    // hook itself exits 0 and the timer, finding no tmux at fire time in
+    // pane_exists, exits on its own with no pidfile, no draft, and no
+    // second attempt. Nothing can be logged here, since there is no stub to
+    // log to: the observable outcome is the absence of every file.
+    run(stopPayload(), {
+      PATH: pathWithoutTmux(),
+      HANDOFF_LANE: "main",
+      TMUX_PANE: "%1",
+      TMUX: "fake",
+      HANDOFF_IDLE_SECONDS: "1",
+    });
+    expect(waitFor(() => readPidfile("main") !== null)).toBe(true);
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => !existsSync(pidfilePath("main")), 5000)).toBe(true);
+    expect(waitFor(() => !isAlive(entry?.pid ?? -1))).toBe(true);
+    expect(existsSync(draftPath("main"))).toBe(false);
+    expect(readFileSync(tmuxLog, "utf-8")).toBe("");
   });
 
   it("does not arm or cancel for a subagent turn", () => {
@@ -592,7 +669,10 @@ describe("idle-timer.sh fire mode", () => {
     // The clear and the submit are separate send-keys calls. If the first
     // one fails, the box still holds whatever was typed, and /handoff sent
     // after it would concatenate with that text and submit as prose. The
-    // draft is salvaged either way; the submit must not follow.
+    // draft is salvaged either way; the submit must not follow. The script
+    // runs without -e and has no retry, so the failing call must also be
+    // the last thing in the log: no second C-u, no /handoff, and the timer
+    // process gone with its pidfile.
     writeFileSync(tmuxCapture, `some pane chrome\n${INPUT_MARKER}half-typed draft text`);
 
     run(stopPayload(), {
@@ -600,8 +680,9 @@ describe("idle-timer.sh fire mode", () => {
       TMUX_PANE: "%1",
       TMUX: "fake",
       HANDOFF_IDLE_SECONDS: "1",
-      TMUX_STUB_SENDKEYS_EXIT: "1",
+      TMUX_STUB_FAIL: "send-keys",
     });
+    expect(waitFor(() => readPidfile("main") !== null)).toBe(true);
     const entry = readPidfile("main");
     if (entry) armedPids.push(entry.pid);
 
@@ -609,10 +690,65 @@ describe("idle-timer.sh fire mode", () => {
     Bun.sleepSync(300);
 
     const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
-    expect(calls.some((c) => c.includes("send-keys") && c.includes("C-u"))).toBe(true);
+    expect(calls.filter((c) => c.includes("send-keys"))).toEqual(["send-keys -t %1 C-u"]);
+    expect(calls[calls.length - 1]).toBe("send-keys -t %1 C-u");
     expect(calls.some((c) => c.includes("/handoff"))).toBe(false);
     expect(readFileSync(draftPath("main"), "utf-8").trim()).toBe("half-typed draft text");
     expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+    expect(waitFor(() => !isAlive(entry?.pid ?? -1))).toBe(true);
+  });
+
+  it("sends no keys when capture-pane fails at fire time", () => {
+    // The pane passed list-panes a moment ago and is gone by capture-pane:
+    // real tmux exits 1 with nothing on stdout. An empty capture has no
+    // marker, so salvage_draft must treat it like any other missing marker
+    // (no draft file for a blank capture) and stop the fire before C-u.
+    writeFileSync(tmuxCapture, `some pane chrome\n${INPUT_MARKER}`);
+
+    run(stopPayload(), {
+      HANDOFF_LANE: "main",
+      TMUX_PANE: "%1",
+      TMUX: "fake",
+      HANDOFF_IDLE_SECONDS: "1",
+      TMUX_STUB_FAIL: "capture-pane",
+    });
+    expect(waitFor(() => readPidfile("main") !== null)).toBe(true);
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("capture-pane"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
+    expect(calls.filter((c) => c.startsWith("capture-pane"))).toEqual(["capture-pane -t %1 -p -J"]);
+    expect(calls.some((c) => c.includes("send-keys"))).toBe(false);
+    expect(existsSync(draftPath("main"))).toBe(false);
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+    expect(waitFor(() => !isAlive(entry?.pid ?? -1))).toBe(true);
+  });
+
+  it("does not inject when list-panes itself fails at fire time", () => {
+    // Distinct from an empty pane list: the tmux server is unreachable, so
+    // the existence check errors instead of answering. Same outcome
+    // required: nothing sent, pidfile removed.
+    run(stopPayload(), {
+      HANDOFF_LANE: "main",
+      TMUX_PANE: "%1",
+      TMUX: "fake",
+      HANDOFF_IDLE_SECONDS: "1",
+      TMUX_STUB_FAIL: "list-panes",
+    });
+    expect(waitFor(() => readPidfile("main") !== null)).toBe(true);
+    const entry = readPidfile("main");
+    if (entry) armedPids.push(entry.pid);
+
+    expect(waitFor(() => readFileSync(tmuxLog, "utf-8").includes("list-panes"), 5000)).toBe(true);
+    Bun.sleepSync(300);
+
+    const calls = readFileSync(tmuxLog, "utf-8").trim().split("\n");
+    expect(calls).toEqual(["list-panes -a -F #{pane_id}"]);
+    expect(waitFor(() => !existsSync(pidfilePath("main")))).toBe(true);
+    expect(waitFor(() => !isAlive(entry?.pid ?? -1))).toBe(true);
   });
 
   it("does not inject when the pane is gone by fire time", () => {
