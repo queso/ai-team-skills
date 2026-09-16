@@ -280,6 +280,44 @@ describe("idle-timer.sh Stop hook mode", () => {
   });
 });
 
+describe("idle-timer.sh Stop hook mode interval validation", () => {
+  // The script runs without -e, so before this guard existed a value that
+  // `sleep` rejects (or a zero) fell straight through fire mode's sleep into
+  // clear_input and submit_handoff: /handoff submitted milliseconds after
+  // every Stop hook. HANDOFF_IDLE_MINUTES is a documented user knob, so a
+  // typo there has to fail closed: no pidfile, no send-keys of any kind.
+  const badIntervals: Array<[string, Record<string, string>]> = [
+    ["HANDOFF_IDLE_MINUTES=0", { HANDOFF_IDLE_MINUTES: "0" }],
+    ["HANDOFF_IDLE_MINUTES=1.5", { HANDOFF_IDLE_MINUTES: "1.5" }],
+    ["HANDOFF_IDLE_SECONDS=notanumber", { HANDOFF_IDLE_SECONDS: "notanumber" }],
+    ["HANDOFF_IDLE_SECONDS=0", { HANDOFF_IDLE_SECONDS: "0" }],
+  ];
+
+  for (const [label, env] of badIntervals) {
+    it(`arms nothing and sends no keys with ${label}`, () => {
+      writeFileSync(tmuxCapture, `some previous turn's output\n${INPUT_MARKER}`);
+
+      // No HANDOFF_IDLE_SECONDS default here: the `arm` helper sets one, and
+      // this case needs exactly the env under test and nothing else.
+      run(stopPayload(), { HANDOFF_LANE: "main", TMUX_PANE: "%1", TMUX: "fake", ...env });
+
+      // A timer that fell through the sleep would have injected within
+      // milliseconds; give it far longer than that to show up.
+      Bun.sleepSync(500);
+
+      expect(existsSync(pidfilePath("main"))).toBe(false);
+      expect(readFileSync(tmuxLog, "utf-8")).not.toContain("send-keys");
+    });
+  }
+
+  it("HANDOFF_IDLE_SECONDS still overrides HANDOFF_IDLE_MINUTES when both are valid", () => {
+    const entry = arm("main", { HANDOFF_IDLE_MINUTES: "58", HANDOFF_IDLE_SECONDS: "100" });
+
+    expect(entry).not.toBeNull();
+    expect(isAlive(entry?.pid ?? -1)).toBe(true);
+  });
+});
+
 describe("idle-timer.sh fire mode", () => {
   it("emits C-u before /handoff Enter, in that order", () => {
     writeFileSync(tmuxCapture, `some pane chrome\n${INPUT_MARKER}half-typed draft text`);

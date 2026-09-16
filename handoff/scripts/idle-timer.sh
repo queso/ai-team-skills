@@ -343,7 +343,12 @@ fire_mode() {
   # now moot.
   [ "${HANDOFF_IDLE_TIMER:-1}" = "0" ] && exit 0
 
-  sleep "$idle_seconds"
+  # This script runs without -e, so a failing sleep (an interval that is
+  # not a number, for one) would otherwise fall straight through to the
+  # injection below, milliseconds after the Stop hook that armed it. Stop
+  # hook mode validates the interval before arming, but this process also
+  # has to defend itself: never inject unless the wait actually happened.
+  sleep "$idle_seconds" || exit 0
 
   # Re-verify before acting: a Stop hook does not fire on an interrupted
   # turn, so everything above could be stale by the time we wake up — the
@@ -481,10 +486,38 @@ if [ -n "$snapshot" ]; then
   fi
 fi
 
+# The interval must be a positive whole number of seconds before a timer is
+# armed on it. HANDOFF_IDLE_MINUTES is a documented user knob, so a typo or
+# a decimal there is plausible, and the failure mode is not a broken timer
+# but the opposite: a value `sleep` rejects, or a zero, would fire the
+# injection immediately after every Stop hook, clearing the input line and
+# submitting /handoff after every turn. Bash arithmetic on a non-integer
+# also aborts this script with an error rather than a clean exit, so the
+# minutes value is checked BEFORE the multiplication, not just after it.
+# On a bad value: say so on stderr once, arm nothing, exit cleanly.
 if [ -n "${HANDOFF_IDLE_SECONDS:-}" ]; then
   idle_seconds="$HANDOFF_IDLE_SECONDS"
+  idle_source="HANDOFF_IDLE_SECONDS=$HANDOFF_IDLE_SECONDS"
 else
-  idle_seconds=$(( ${HANDOFF_IDLE_MINUTES:-58} * 60 ))
+  idle_minutes="${HANDOFF_IDLE_MINUTES:-58}"
+  idle_source="HANDOFF_IDLE_MINUTES=$idle_minutes"
+  case "$idle_minutes" in
+    ''|*[!0-9]*)
+      echo "handoff idle-timer: $idle_source is not a whole number of minutes; not arming" >&2
+      exit 0
+      ;;
+  esac
+  idle_seconds=$(( idle_minutes * 60 ))
+fi
+case "$idle_seconds" in
+  ''|*[!0-9]*)
+    echo "handoff idle-timer: $idle_source is not a whole number of seconds; not arming" >&2
+    exit 0
+    ;;
+esac
+if [ "$idle_seconds" -eq 0 ]; then
+  echo "handoff idle-timer: $idle_source gives a zero-second interval; not arming" >&2
+  exit 0
 fi
 
 arm_timer
