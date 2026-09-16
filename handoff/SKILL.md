@@ -260,27 +260,11 @@ The script needs `jq` or `python3` to emit its JSON payload. With neither availa
 
 The timer cannot write the progress file itself: summarizing working state has to happen in the model's own session, not in a detached script. Injecting the slash command into the live pane is the only way to hand the writing back to the session that can actually do it.
 
+Installing and removing the timer, the two extra files it writes into `.handoff/` (`<lane>.timer.pid` and `<lane>.draft.txt`), and the environment variables that tune it are documented in `references/idle-timer.md`. Read that file before installing the timer or answering a question about its files or variables.
+
 ### It requires tmux or herdr
 
 Injection needs something to inject into. With neither `$TMUX_PANE` nor `$HERDR_PANE_ID` set, there is no way to submit text into a bare terminal — OS-level UI automation is a different, fragile category and out of scope here — so the hook exits without arming anything. A session running in a plain terminal sees no timer and no error; that is the intended behavior, not a bug to chase down.
-
-### Installing and removing it
-
-It is opt-in on purpose: auto-submitting text into a session someone is actively typing in is intrusive, so a plain `/handoff install` never registers it.
-
-- `/handoff install --idle-timer` registers both the timer and the `SessionStart` reload hook.
-- `/handoff install --uninstall --idle-timer` removes only the timer, leaving the reload hook in place.
-- `/handoff install --uninstall` (no `--idle-timer`) removes both.
-- `HANDOFF_IDLE_TIMER=0` disables the timer without touching the installed hook. Set it in the `env` block of Claude Code's `settings.json`, or export it before launching Claude Code; hooks inherit the environment Claude Code was launched with, so exporting it in a shell during a session has no effect. Any timer already armed is still cancelled by the next turn's Stop hook; the switch just stops a new one from replacing it.
-
-### What it writes
-
-Two extra files show up in `.handoff/`, both scoped to the lane:
-
-- `<lane>.timer.pid` — the armed timer's pid and a random token, so the next turn's Stop hook can find and cancel it. The token guards against a recycled pid being mistaken for the timer that wrote it.
-- `<lane>.draft.txt` — appears only if there was text sitting in the input box when the timer fired. Injecting `/handoff` has to clear that line first, or the injected command concatenates with whatever was typed and submits as prose, silently producing no handoff. Before clearing the line, the timer salvages it into this file rather than destroying it. A long line that wrapped at the pane width is joined back into the one line you typed. A draft spanning several lines is salvaged in full, and in that case the timer writes the file and stops: it sends no `Ctrl+U` and no `/handoff`, because `Ctrl+U` in Claude Code clears only the current line and the leftover lines would submit with the command as prose. The cost is one redundant idle turn. When the pane is not showing the input box at all (no prompt marker, such as a pending permission dialog), the timer injects nothing; if the screen has any text on it, that full capture is written to this file under a header saying the marker was not found, otherwise no file is written.
-
-The draft file holds the typed text verbatim, so if a password or private prose was sitting in the input box, that is what lands in the file. Nothing prunes it: it stays in `.handoff/` until you read it back and delete it. Keep both files out of git. This repo ignores `.handoff/` in its `.gitignore`; in another repo, `/handoff install --project --idle-timer` lists `.handoff/*.draft.txt` and `.handoff/*.timer.pid` in that repo's `.git/info/exclude`, while a user-level install is not tied to one repo and relies on the `.gitignore` reminder in Step 2.
 
 ### Guards
 
@@ -293,11 +277,3 @@ Three things make the Stop hook a no-op:
 ### The herdr path is unverified
 
 The tmux injection (`tmux send-keys`) was confirmed end to end against a live session. The herdr path uses four subcommands, none of which has been run against a real herdr pane the way the tmux path has: `herdr pane get <id>` to check the pane still exists, `herdr pane read <id> --source visible` to capture the input box for the draft salvage, `herdr pane send-keys <id> ctrl+u` to clear the box, and `herdr pane run <id> /handoff` to submit, by analogy to the same one-call send-and-submit shape as the tmux command. Treat it as best-effort until someone confirms it. The failure modes are ordered so a wrong guess fails closed: if `pane get` or `pane read` is wrong the timer never fires, and if `pane send-keys` exits non-zero the timer stops there and never calls `pane run`, so the injection cannot land on top of an uncleared box. The tests pin the exact argv of all four calls against a stub, which verifies what the script emits, not what herdr accepts.
-
-### Environment variables
-
-- `HANDOFF_IDLE_MINUTES` (default `58`) — idle window before firing
-- `HANDOFF_IDLE_SECONDS` — overrides `HANDOFF_IDLE_MINUTES` in raw seconds, for tests that should not sleep for real minutes
-- `HANDOFF_IDLE_TIMER=0` — disable arming without uninstalling (set in the `settings.json` `env` block or before launching Claude Code; a mid-session shell export does not reach the hook)
-- `HANDOFF_IDLE_MIN_BYTES` (default `2000`) — transcript-size floor below which nothing arms
-- `HANDOFF_IDLE_COOLDOWN_SECONDS` (default `120`) — skip re-arming this soon after a fresh `.handoff/<lane>.md` write
