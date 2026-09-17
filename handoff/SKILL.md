@@ -20,7 +20,7 @@ This is not a substitute for auto-compaction — it is a better-timed, curated r
 - `/handoff` — write or rewrite the progress file
 - `/handoff done` — archive the progress file and clear it (work finished, or moving to something else)
 - `/handoff check` — score a resumed session against the checks file
-- `/handoff install` — register the session hook, so the progress file reloads by itself
+- `/handoff install` — register the session hook, so the progress file reloads by itself; `--idle-timer` also arms an opt-in Stop hook that submits `/handoff` for you if the session goes idle
 
 ---
 
@@ -203,9 +203,11 @@ bash "$CLAUDE_SKILL_DIR/scripts/install-hook.sh"
 
 If that variable is not set, use the directory this `SKILL.md` was loaded from. The script writes to `~/.claude/settings.json` by default; pass `--local` for `~/.claude/settings.local.json` (machine-local, usually gitignored), `--project` for the current repo's `.claude/settings.json`, or `--target <file>` for anything else. Ask which scope the user wants only if they have not already said — otherwise take the default.
 
+Pass `--idle-timer` to also register the idle timer described in **The idle timer** below. It is opt-in — a plain install only ever registers the session-reload hook, since auto-submitting text into a live session is intrusive enough that it must not arrive switched on by default.
+
 It is idempotent. Re-running reports "already registered" and changes nothing, so it is safe to offer whenever the hook does not appear to be firing. Report what it printed, and that a new session or `/clear` is needed for the hook to take effect.
 
-`--uninstall` reverses it. `--dry-run` prints the resulting file without writing.
+`--uninstall` reverses it, removing both hooks. Combined with `--idle-timer` (`--uninstall --idle-timer`), it removes only the idle timer and leaves the session-reload hook in place — that is how to turn the timer off without losing the reload. `--dry-run` prints the resulting file without writing.
 
 If the script is missing — an older install, or a copy that did not ship it — fall back to editing the settings file directly with the JSON in **The session hook** below.
 
@@ -249,3 +251,51 @@ Tunable with `HANDOFF_LANE` to name the seat explicitly (falls back to `$HERDR_P
 If a lane var resolves to a file that has never been written but a pre-seat-keying `.handoff/progress.md` exists, the hook reports that once via `systemMessage` instead of silently doing nothing — that file is orphaned and needs a manual rename to `.handoff/<lane>.md`, or a `/handoff done` to archive it.
 
 The script needs `jq` or `python3` to emit its JSON payload. With neither available it exits silently rather than printing text that would be mistaken for context. `install-hook.sh` requires `python3` specifically, and prints the JSON block above if it is missing.
+
+## The idle timer
+
+`scripts/idle-timer.sh` is an opt-in `Stop` hook. At the end of every turn it cancels whatever timer the lane already had armed, then arms a fresh detached one for `HANDOFF_IDLE_MINUTES` (default 58) — comfortably under the ~60 minute prompt-cache TTL this exists to beat. If the session actually goes idle that long, the timer injects `/handoff` into the live pane, so the progress file gets written before the cache lapses and the next turn re-uploads the whole accumulated context at the write rate instead of resuming from cache.
+
+**It never triggers `/clear`.** The handoff write is the user's manual signal that clearing is safe, not something to automate out from under them. The timer's only job is to get `/handoff` submitted in the live pane; it stops there.
+
+The timer cannot write the progress file itself: summarizing working state has to happen in the model's own session, not in a detached script. Injecting the slash command into the live pane is the only way to hand the writing back to the session that can actually do it.
+
+### It requires tmux or herdr
+
+Injection needs something to inject into. With neither `$TMUX_PANE` nor `$HERDR_PANE_ID` set, there is no way to submit text into a bare terminal — OS-level UI automation is a different, fragile category and out of scope here — so the hook exits without arming anything. A session running in a plain terminal sees no timer and no error; that is the intended behavior, not a bug to chase down.
+
+### Installing and removing it
+
+It is opt-in on purpose: auto-submitting text into a session someone is actively typing in is intrusive, so a plain `/handoff install` never registers it.
+
+- `/handoff install --idle-timer` registers both the timer and the `SessionStart` reload hook.
+- `/handoff install --uninstall --idle-timer` removes only the timer, leaving the reload hook in place.
+- `/handoff install --uninstall` (no `--idle-timer`) removes both.
+- `HANDOFF_IDLE_TIMER=0` disables the timer at runtime without touching the installed hook. Any timer already armed is still cancelled by the next turn's Stop hook; the runtime switch just stops a new one from replacing it.
+
+### What it writes
+
+Two extra files show up in `.handoff/`, both scoped to the lane:
+
+- `<lane>.timer.pid` — the armed timer's pid and a random token, so the next turn's Stop hook can find and cancel it. The token guards against a recycled pid being mistaken for the timer that wrote it.
+- `<lane>.draft.txt` — appears only if there was text sitting in the input box when the timer fired. Injecting `/handoff` has to clear that line first, or the injected command concatenates with whatever was typed and submits as prose, silently producing no handoff. Before clearing the line, the timer salvages it into this file rather than destroying it.
+
+### Guards
+
+Three things make the Stop hook a no-op:
+
+- **a subagent turn** — a subagent shares the parent session's transcript but not its pane, and arming or cancelling on its behalf would race the real turns happening in that same pane. This is checked before anything else, so a subagent turn skips even cancelling the lane's existing timer.
+- **the transcript is under `HANDOFF_IDLE_MIN_BYTES`** (default 2000) — a turn or two in, there is nothing worth writing yet, though any previously-armed timer is still cancelled.
+- **`.handoff/<lane>.md` was written within the last `HANDOFF_IDLE_COOLDOWN_SECONDS`** (default 120) — including by the `/handoff` this same timer might have just injected, so a fresh write does not immediately get a new timer armed on top of it. Again, the old timer is still cancelled.
+
+### The herdr path is unverified
+
+The tmux injection (`tmux send-keys`) was confirmed end to end against a live session. The herdr equivalent (`herdr pane run`) is implemented by analogy to the same one-call send-and-submit shape, but has not been run against a real herdr pane the way the tmux path has — treat it as best-effort until someone confirms it.
+
+### Environment variables
+
+- `HANDOFF_IDLE_MINUTES` (default `58`) — idle window before firing
+- `HANDOFF_IDLE_SECONDS` — overrides `HANDOFF_IDLE_MINUTES` in raw seconds, for tests that should not sleep for real minutes
+- `HANDOFF_IDLE_TIMER=0` — disable arming at runtime without uninstalling
+- `HANDOFF_IDLE_MIN_BYTES` (default `2000`) — transcript-size floor below which nothing arms
+- `HANDOFF_IDLE_COOLDOWN_SECONDS` (default `120`) — skip re-arming this soon after a fresh `.handoff/<lane>.md` write
