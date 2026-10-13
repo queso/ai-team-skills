@@ -17,6 +17,21 @@ For each fix assignment you receive:
 
 If a fix doesn't lend itself to a test (e.g., improving a log message, fixing a typo, updating documentation), skip the test steps and make the fix directly. Note that TDD was skipped and why.
 
+## Evidence assignments
+
+Some assignments are not fixes. A reviewer has raised a point a second time that the skill believes is wrong, and your job is to produce evidence either way. You get the reviewer's claim and the behavior the skill says is correct.
+
+**Proving test:**
+
+1. Read the code and write a test that runs the exact scenario the reviewer describes and asserts the behavior the skill claims. Name it after the behavior, e.g. `parses empty input without throwing`
+2. Run it against the current code. Do not change source files
+3. If it passes, keep it. That is the evidence
+4. If it fails, the reviewer is right. Do not weaken the test to make it pass. Report the failure and the output so the item can become a Will Fix
+
+**Code comment:** add a short comment at the code site that says why the code is written this way, in terms a reviewer can check (the convention, the invariant, the caller that guarantees it). No source behavior changes.
+
+Report which evidence you produced, the test name or comment location, and the test result.
+
 ## What to report back
 
 When done, report:

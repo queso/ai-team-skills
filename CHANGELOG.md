@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- `address-pr-feedback` no longer stops when a reviewer repeats a declined point. On the second raise it proves its position with a test that passes against the current code, a code comment, or a posted manual check, and changes to Will Fix if the evidence fails; later raises get a one-line pointer to the evidence. Repeats are matched by substance, so a bot re-posting a point as a new comment counts. Replies inside threads the skill resolved are no longer dropped. The final summary adds a table of every decision made during the loop and what it rests on
 - `address-pr-feedback` now runs unattended: it categorizes and replies without confirmation prompts, then rechecks the PR every 5 minutes and repeats on new feedback until 15 minutes pass with nothing new. Adds `--once` to run a single pass and `--create-issues` to open issues for deferred items. Filters out the operator's own replies, uses `since` on recheck fetches, and stops early on merge/close, push conflicts, unrepairable tests, repeated reviewer pushback, or ten passes
 
 ### Added
