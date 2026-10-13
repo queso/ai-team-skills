@@ -85,7 +85,7 @@ Maintain an in-memory ledger for the whole run:
 - `last_fetch_at`: the timestamp of the most recent fetch, in ISO 8601 UTC
 - `quiet_since`: the time the most recent batch of replies was posted, or the run start time if nothing has been posted yet
 - `passes`: how many passes have completed
-- `decisions`: one entry per point the skill declined, deferred, proved, or changed its mind on. Each entry holds the item number, reviewer, `path:line` (or "conversation"), a one-line statement of the reviewer's claim in your own words, the category, the reason, any evidence (test name and commit, code comment location and commit, or manual check), the thread URL, and how many times the point has been raised
+- `decisions`: one entry per point the skill declined (Won't Fix), deferred (New Issue), proved, or changed its mind on. Each entry holds the item number, reviewer, `path:line` (or "conversation"), a one-line statement of the reviewer's claim in your own words, the category, the reason, any evidence (test name and commit, code comment location and commit, or manual check), the thread URL, and how many times the point has been raised
 
 On the first pass, every unresolved actionable comment is in scope. On later passes, only comments whose ID is not in `seen_ids` are in scope. See Step 7 for how that narrows the work.
 
@@ -135,7 +135,7 @@ Because no one confirms these decisions, apply these rules when a comment could 
 - Choose **Won't Fix** only when you can state a concrete reason a maintainer would accept: a project convention with a file to cite, a factual misreading you can point at in the code, or an existing implementation elsewhere.
 - A reviewer replying inside a thread the skill already answered is new feedback. If they say a fix is incomplete, treat it as a new Will Fix item. Pushback on a Won't Fix follows the re-raise rules below.
 
-Record every Won't Fix and New Issue in `decisions`.
+Record every Won't Fix and New Issue in `decisions`. New Issue is the deferred category; there is no separate Deferred entry. The re-raise rules below update these entries when a point is proved or reversed.
 
 ### Re-raised points
 
@@ -145,7 +145,7 @@ A re-raise is a point already in `decisions` coming back, either as a reply in i
 
 1. Re-read the code and the new comment. If the reviewer brings an argument you had not considered, or on a second look they are right, change the decision to Will Fix and fix it in this pass. Record the change in `decisions` with the reason.
 2. Otherwise, settle the point with evidence a reviewer can check, in this order of preference:
-   - **A test.** Write a test that runs the scenario the reviewer describes and asserts the behavior you claimed. It should pass against the current code with no source change. Commit it with this pass. If it fails, the reviewer was right: change the decision to Will Fix and fix the code through the normal TDD loop.
+   - **A test.** Write a test that runs the scenario the reviewer describes and asserts the behavior you claimed. Run it against the current code with no source change, and commit nothing until you have the result. If it passes, commit it with this pass. If it fails, the reviewer was right: do not commit it as evidence. Change the decision to Will Fix and use that failing test as the first step of the normal TDD loop.
    - **A code comment.** When the point is about design intent, a convention, or something a test cannot observe, add a short comment at the code site saying why it is written this way. Commit it with this pass.
    - **A manual check.** When neither fits (UI behavior, an external service, timing or performance), run the check yourself and post the exact commands and trimmed output in the reply.
 3. Reply in the thread with the evidence: the test name and commit, the comment location and commit, or the manual-check output. Resolve the thread and continue.
