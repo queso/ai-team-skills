@@ -16,7 +16,9 @@ Runs an unattended review loop on a pull request. Once started it needs no confi
 - **Commits and pushes** with a descriptive message referencing the PR number and pass count
 - **Replies to every thread and resolves it**, citing the commit for fixes and a concrete reason for anything declined or deferred
 - **Waits 5 minutes, rechecks, and repeats** on only the feedback that arrived since the last pass
-- **Stops after 15 quiet minutes**, or earlier if the PR closes, a push conflicts, tests cannot be repaired, a reviewer pushes back twice on a declined item, or ten passes complete
+- **Settles repeated points with evidence**: when a reviewer raises a declined point again, even as a new comment, it proves its position with a passing test, a code comment, or a posted manual check, and flips to a fix if the evidence goes the reviewer's way. Repeats never stop the loop
+- **Stops after 15 quiet minutes**, or earlier if the PR closes, a push conflicts, tests cannot be repaired, or ten passes complete
+- **Ends with a decisions table**: every declined, deferred, proved, or reversed point, with what each decision rests on
 
 #### Install
 
