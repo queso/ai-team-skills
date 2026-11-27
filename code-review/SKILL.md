@@ -26,6 +26,7 @@ Use a **code-review-expert** subagent (via the Task tool) to perform a thorough 
 2. Read any files it needs for additional context
 3. Evaluate the changes against the criteria in the review checklist below
 4. Consult the `references/` directory for language-specific and domain-specific examples of good and bad patterns
+5. For each finding, include the file path(s) it touches — this is required for the orchestrator to compute the parallelism estimate in Step 3
 
 ## Review Checklist
 
@@ -44,7 +45,7 @@ The subagent should verify each of these for every changed file:
 
 ## Step 3: Summarize
 
-Present the subagent's findings to the user organized by severity:
+Present the subagent's findings to the user organized by severity, numbering each finding sequentially across all three tiers (so finding numbers are unique and usable in the parallelism estimate below):
 
 1. **Must Fix** - Issues that should be resolved before merging (security, correctness bugs, broken tests)
 2. **Should Fix** - Issues that meaningfully improve quality (readability, weak types, missing edge cases)
@@ -52,17 +53,18 @@ Present the subagent's findings to the user organized by severity:
 
 ### Parallelism Estimate
 
-After presenting findings by severity, analyze file independence across all review findings and report a **Parallelism Estimate** showing how many subagents could fix issues in parallel.
+After presenting findings by severity, analyze file independence across all review findings and report a **Parallelism Estimate** showing how many subagents could fix issues in parallel. This is an estimate only — it does not trigger launching fix agents; that is a separate decision.
 
 **Rules for grouping:**
-- Fixes that touch the same file or closely related code (e.g., a function and its caller in the same file) must be serialized in one agent
-- Fixes that touch independent files can run in parallel as separate agents
-- Number each finding sequentially across all severity levels
+- Fixes that touch the same file, or whose changes must be coordinated across files (renames, shared interfaces, lockfiles, shared config), must be serialized in one agent
+- Fixes that touch truly independent files can run in parallel as separate agents
 
 **Report two groupings:**
 
 1. **Must Fix + Should Fix** — how many parallel subagents are needed if only addressing blocking and quality issues
 2. **All items** — how many parallel subagents if addressing everything including Consider items
+
+If there are zero findings, print "0 items → 0 parallel subagents". With one finding, print "1 item → 1 parallel subagent".
 
 **Example output:**
 
@@ -74,11 +76,10 @@ After presenting findings by severity, analyze file independence across all revi
 - Agent 2: #2 (src/api.ts)
 - Agent 3: #4 (src/validator.ts)
 
-**All items (6 items) → 4 parallel subagents**
-- Agent 1: #1, #3 (both touch src/parser.ts)
+**All items (6 items) → 3 parallel subagents**
+- Agent 1: #1, #3, #5 (src/parser.ts — findings collapse into same agent)
 - Agent 2: #2 (src/api.ts)
 - Agent 3: #4, #6 (both touch src/validator.ts)
-- Agent 4: #5 (src/utils.ts)
 ```
 
 ## Output Formatting Rules
