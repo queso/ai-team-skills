@@ -9,7 +9,7 @@
     "format:check": "biome format ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
+    "@biomejs/biome": "2.4.4",
     "@types/bun": "latest",
     "gray-matter": "^4.0.3"
   },
